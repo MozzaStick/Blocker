@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Website Blocked</title>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="assets/common.css">
+  <style>
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background-color: #1E3A5F;
+    }
+    #blockedDescription, #challengeQuestion, #hardModeWarning p, #confirmText, #unblockTime, #productiveUrls {
+      max-width: var(--content-max-width);
+    }
+    .blocked-message {
+      text-align: center;
+      min-width: 505px;
+    }
+    .blocked-message h1 {
+      font-size: 2rem;
+      color: white;
+    }
+    .blocked-message p {
+      font-size: 1rem;
+      color: #CCC;
+    }
+    .blocked-message .unblock-button,
+    .blocked-message .focus-button,
+    .blocked-message .confirm-unblock-button,
+    .blocked-message .cancel-reason-button,
+    .blocked-message .submit-reason-button,
+    .blocked-message .unblock-time-button {
+      padding: 10px 20px;
+      font-size: 1rem;
+      color: #ffffff;
+      border: none;
+      cursor: pointer;
+    }
+    .blocked-message .unblock-button {
+      background-color: #28a745; /* Green background for the unblock button */
+    }
+    .blocked-message .unblock-button:hover {
+      background-color: #218838;
+    }
+    .blocked-message .unblock-button:disabled, .blocked-message .focus-button:disabled {
+      cursor: not-allowed; /* Change cursor to indicate disabled state */
+      opacity: 0.65; /* Slightly faded look */
+    }
+    .blocked-message .focus-button {
+      background-color: #dc3545; /* Red background for the remain focused button */
+    }
+    .blocked-message .focus-button:hover {
+      background-color: #c82333;
+    }
+    .blocked-message .confirm-unblock-button {
+      background-color: #007bff; /* Blue background for the confirm button */
+    }
+    .blocked-message .confirm-unblock-button:hover {
+      background-color: #0056b3;
+    }
+    .blocked-message .cancel-reason-button {
+      background-color: #6c757d; /* Grey background for the cancel button */
+    }
+    .blocked-message .cancel-reason-button:hover {
+      background-color: #5a6268;
+    }
+    .blocked-message .submit-reason-button {
+      background-color: #ffc107; /* Yellow background for the submit reason button */
+      color: black;
+    }
+    .blocked-message .submit-reason-button:hover {
+      background-color: #e0a800;
+    }
+    .blocked-message .unblock-time-button {
+      background-color: #28a745; /* Green background for the unblock time button */
+    }
+    .blocked-message .unblock-time-button:hover {
+      background-color: #218838;
+    }
+    .reason-input {
+      margin-top: 20px;
+      color: white;
+    }
+    .default-buttons,
+    .confirm-message,
+    .time-input,
+    .message-buttons,
+    .challenge,
+    .night-buttons {
+      display: none;
+      margin-top: 20px;
+      color: white;
+    }
+    .reason-input input {
+      padding: 10px;
+      font-size: 1rem;
+      width: 80%;
+      max-width: 300px;
+    }
+    select, input[type=number] {
+      font-size: 1rem;
+      color: black;
+    }
+    .message-buttons h2 {
+      font-size: 1.5rem;
+    }
+    #productiveUrls {
+      font-size: 1rem;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      column-gap: 20px;
+      row-gap: 10px;
+    }
+    #productiveUrls a, #productiveUrls a:visited {
+      color: white;
+    }
+    #dailyGoals {
+      list-style-type: none;
+      margin: 0 auto;
+      width: fit-content;
+      max-width: min(var(--content-max-width), 100%);
+      padding: 0;
+      text-align: left;
+    }
+    #dailyGoals li {
+      align-items: center;
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 28px minmax(0, 1fr) auto;
+      margin-bottom: 10px;
+      justify-content: start;
+      font-size: 1rem;
+      width: 100%;
+    }
+    #dailyGoals a, #dailyGoals a:visited {
+      color: white;
+      justify-self: start;
+      width: max-content;
+    }
+    #dailyGoals .completed {
+      color: #CCC;
+      text-decoration: line-through;
+    }
+    #productiveUrls a:hover {
+      color: #CCC;
+    }
+    h2 {
+      font-size: 1.3rem;
+    }
+    h3 {
+      font-size: 1.1rem;
+    }
+    @media only screen and (max-width: 505px) {
+      .blocked-message {
+        text-align: center;
+        min-width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="blocked-message">
+    <h1 id="message">Website Blocked</h1>
+    <p id="blockedDescription">The website you are trying to visit is blocked.</p>
+    <p id="blockCountMessage"></p>
+    <p id="unblockCountMessage"></p>
+    <p id="durationText"></p>
+    <div class="reason-input">
+      <h2>Why did you decide to go to this site?</h2>
+      <input type="text" id="reason" placeholder="Insert reason here">
+      <button id="submitReasonButton" class="submit-reason-button">Submit</button>
+    </div>
+    <div class="default-buttons">
+      <h2>What do you want to do now?</h2>
+      <button id="unblockButton" class="unblock-button"><span id="unblockEmoji">🔓</span> <span id="unblockText">Unblock Site</span></button>
+      <button id="reasonButton" class="confirm-unblock-button">📝 Give Reason</button>
+      <button id="focusButton" disabled class="focus-button">🔒 Remain Focused</button>
+    </div>
+    <div class="challenge">
+      <h2>To unblock the site, type the following quote exactly as shown:</h2>
+      <p id="challengeQuestion"></p>
+      <div id="challengeInput" style="display: flex; justify-content: center; margin-bottom: 16px;">
+        <textarea id="challengeAnswer" placeholder="Start typing here..." rows="4" cols="70" style="display: block;" spellcheck="false"></textarea>
+      </div>
+      <button id="submitChallengeButton" class="confirm-unblock-button">Submit Answer</button>
+      <p id="challengeFeedback" style="color: yellow; margin-top: 10px;"></p>
+    </div>
+    <div class="time-input">
+      <h2>How long should this website be unblocked for?</h2>
+      <select id="unblockDuration">
+        <option value="1">1 minute</option>
+        <option value="5">5 minutes</option>
+        <option value="10">10 minutes</option>
+        <option value="15">15 minutes</option>
+        <option value="30">30 minutes</option>
+        <option value="60">1 hour</option>
+        <option value="120">2 hours</option>
+        <option value="240">4 hours</option>
+        <option value="480">8 hours</option>
+        <option value="720">12 hours</option>
+        <option value="1440">1 day</option>
+        <option value="6AM">Until 6AM</option>
+        <option value="forever">Forever</option>
+        <option value="custom" selected>Custom (minutes)</option>
+        <option value="hours">Custom (hours)</option>
+      </select>
+      <input type="number" id="customDurationHrs" min="0" max="23" value="0" style="display:none;">
+      <span id="customDurationColon" style="display:none">:</span>
+      <input type="number" id="customDuration" min="1" max="1440" style="display:inline;">
+      <button id="unblockTimeButton" class="unblock-time-button">Unblock and Continue</button>
+      <button id="backTimeButton" class="cancel-reason-button">Go Back</button>
+    </div>
+    <div class="confirm-message">
+      <h2>Confirm Unblock</h2>
+      <div id="hardModeWarning" style="display: none;">
+        <h3>Final Confirmation</h3>
+        <p>
+          You are about to temporarily remove a restriction on this website.<br>
+          Please proceed only if you are certain this is your intended choice.
+        </p>
+      </div>
+      <p id="confirmText"></p>
+      <p id="unblockTime"></p>
+      <p>Are you sure you want to proceed?</p>
+      <button id="confirmUnblockButton" class="confirm-unblock-button">🔓 Yes, Unblock Site</button>
+      <button id="backConfirmButton" class="submit-reason-button">⏳ No, Adjust Time</button>
+      <button id="cancelUnblockButton" class="focus-button">🔒 No, Block Site</button>
+    </div>
+    <div class="message-buttons">
+      <div>
+        <button id="habitTrackerButton" class="confirm-unblock-button">✅ Habit Tracker Settings</button>
+        <button id="editMessageButton" class="submit-reason-button" style="display:inline;">📝 Edit Message</button>
+        <button id="closeButton" class="focus-button">🔒 Close Tab</button>
+      </div>
+      <div id="dailyGoalsSection" style="display:none;">
+        <h2>Habit Tracker</h2>
+        <ul id="dailyGoals"></ul>
+      </div>
+      <h2>Productive Sites</h2>
+      <div id="productiveUrls">
+        <a href="https://www.khanacademy.org" target="_blank">Khan Academy</a>
+        <a href="https://www.coursera.org" target="_blank">Coursera</a>
+        <a href="https://www.edx.org" target="_blank">edX</a>
+        <a href="https://www.codecademy.com" target="_blank">Codecademy</a>
+        <a href="https://www.duolingo.com" target="_blank">Duolingo</a>
+      </div>
+    </div>
+    <div class="night-buttons">
+      <button id="closeButtonNight" class="focus-button">🔒 Close Tab</button>
+    </div>
+  </div>
+  <script src="blocked.js"></script>
+  <script src="quotes.js"></script>
+</body>
+</html>

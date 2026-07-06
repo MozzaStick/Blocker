@@ -1,0 +1,1495 @@
+document.addEventListener('DOMContentLoaded', () => {
+  // Helper function to check if it's night time (9PM-4AM)
+  function isNightTime() {
+    const now = new Date();
+    const currentHour = now.getHours();
+    return currentHour >= 21 || currentHour < 4;
+  }
+
+  // Tabs
+  const accessTab = document.getElementById('accessTab');
+  const sitesTab = document.getElementById('sitesTab');
+  const optionsTab = document.getElementById('optionsTab');
+  const dailyGoalsTab = document.getElementById('dailyGoalsTab');
+  const analyticsTab = document.getElementById('analyticsTab');
+  const savedUrlsTab = document.getElementById('savedUrlsTab');
+  const productiveUrlsTab = document.getElementById('productiveUrlsTab');
+  const exportTab = document.getElementById('exportTab');
+  const helpTab = document.getElementById('helpTab');
+  let requestedStartupTab = null;
+
+  function openTab(tabName) {
+    const tabcontent = document.getElementsByClassName("tabcontent");
+    for (let i = 0; i < tabcontent.length; i++) {
+      tabcontent[i].style.display = "none";
+    }
+    const tablinks = document.getElementsByClassName("tablinks");
+    for (let i = 0; i < tablinks.length; i++) {
+      tablinks[i].classList.remove("active");
+    }
+    document.getElementById(tabName).style.display = "block";
+    document.querySelector(`[data-tab="${tabName}"]`).classList.add("active");
+  }
+
+  // Event listeners for tabs
+  accessTab.addEventListener('click', () => openTab('Access'));
+  sitesTab.addEventListener('click', () => openTab('Sites'));
+  optionsTab.addEventListener('click', () => openTab('Options'));
+  dailyGoalsTab.addEventListener('click', () => {
+    openTab('DailyGoals');
+    loadDailyGoals();
+  });
+  analyticsTab.addEventListener('click', () => openTab('Analytics'));
+  savedUrlsTab.addEventListener('click', () => openTab('SavedUrls'));
+  productiveUrlsTab.addEventListener('click', () => openTab('ProductiveUrls'))
+  exportTab.addEventListener('click', () => openTab('Export'))
+  helpTab.addEventListener('click', () => window.open('help.html'));
+
+  // Check if a specific tab should be opened
+  chrome.storage.sync.get(['openTab'], (data) => {
+    if (data.openTab) {
+      requestedStartupTab = data.openTab;
+      openTab(data.openTab);
+      switch(data.openTab) {
+        case 'Analytics':
+          loadAnalytics();
+          break;
+        case 'DailyGoals':
+          loadDailyGoals();
+          break;
+        case 'SavedUrls':
+          loadSavedUrls();
+          break;
+      }
+      // Clear the openTab value
+      chrome.storage.sync.remove('openTab');
+    } else {
+      // Default to the Access tab if no tab is specified
+      openTab('Access');
+    }
+  });
+
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === 'openDailyGoals') {
+      openTab('DailyGoals');
+      loadDailyGoals();
+    }
+  });
+
+  const mathProblemsContainer = document.getElementById('mathProblems');
+  let numProblems = 1;
+  const correctAnswers = [];
+  let challenge = 'math';
+
+  const blockedList = document.getElementById('blockedSitesList');
+  const addUrlInput = document.getElementById('addUrlInput');
+  const addUrlButton = document.getElementById('addUrlButton');
+
+  const addProductiveInput = document.getElementById('addProductiveInput')
+  const addProductiveButton = document.getElementById('addProductiveButton');
+  const addDailyGoalTitle = document.getElementById('addDailyGoalTitle');
+  const addDailyGoalUrl = document.getElementById('addDailyGoalUrl');
+  const addDailyGoalButton = document.getElementById('addDailyGoalButton');
+
+  const backgroundColorSelect = document.getElementById('backgroundColorSelect');
+  const confirmMessage = document.getElementById('enableConfirmMessage');
+  const reasonInput = document.getElementById('enableReasonInput');
+  const ubButtonDisabling = document.getElementById('enableUbButtonDisabling');
+  const disableDuration = document.getElementById('ubDisableDuration');
+  const timeInput = document.getElementById('enableTimeInput');
+  const tempUnblocking = document.getElementById('enableTempUnblocking');
+  const nightMode = document.getElementById('enableNightMode');
+  const tempUbOptions = document.getElementById('enableTempUbOptions');
+  const tempUbPopup = document.getElementById('enableTempUbPopup');
+  const ubDuration = document.getElementById('ubDuration');
+  const blockUrlSelect = document.getElementById('blockUrlSelect');
+  const focusSelect = document.getElementById('focusSelect');
+  const redirectField = document.getElementById('redirectPage');
+  const displayMessage = document.getElementById('messageCheckbox');
+  const messageField = document.getElementById('message');
+  const messageLinkField = document.getElementById('messageLink');
+  const notiReblock = document.getElementById('enableNotifications');
+
+  let draggedItem = null;
+
+  chrome.storage.sync.remove('enableAutoAdvance');
+
+  // Load blocked items from storage
+  chrome.storage.sync.get(['blocked', 'enabled', 'favorites', 'hardMode', 'blockerEnabled',
+  'blockedPageBgColor', 'enableConfirmMessage', 'enableReasonInput', 'enableUbButtonDisabling', 'ubDisableDuration', 
+  'enableTimeInput', 'enableTempUnblocking', 'enableNightMode', 'enableTempUbOptions', 'enableTempUbPopup', 'unblockDuration', 'saveBlockedUrls',
+  'focusOption', 'redirectUrl', 'enableMessage', 'message', 'messageLink', 'enableNotiReblock'], (data) => {
+    const blocked = data.blocked || [];
+    const enabled = data.enabled || [];
+    const favorites = data.favorites || [];
+    const hardMode = data.hardMode || [];
+    const blockerDisabled = data.blockerEnabled === false;
+
+    const overlap = enabled.filter(site => hardMode.includes(site));
+    numProblems = overlap.length;
+
+    for(let i = 0; i < numProblems; i++) {
+      const problem = document.createElement('p');
+      problem.classList.add('math-problem');
+      problem.innerHTML = `Problem ${i + 1}: ${generateMathProblem()}`;
+      const answerInput = document.createElement('input');
+      answerInput.type = 'number';
+      answerInput.classList.add('answer-input');
+      problem.appendChild(answerInput);
+      mathProblemsContainer.appendChild(problem);
+    }
+
+    function generateMathProblem() {
+      const num1 = Math.floor(Math.random() * 900) + 100;
+      const num2 = Math.floor(Math.random() * 90) + 10;
+      const num3 = Math.floor(Math.random() * 9000) + 1000;
+      correctAnswers.push(num1 * num2 + num3);
+      return `${num1} × ${num2} + ${num3} = `;
+    }
+
+    function generateQuote() {
+      const quoteObj = quotes[Math.floor(Math.random() * quotes.length)];
+      const challengeQuote = quoteObj.quote
+        .replace(/—|–/g, ', ')
+        .replace(/…/g, '...')
+        .replace(/[“”]/g, '"');
+      const quoteTextElem = document.getElementById('quoteText');
+      quoteTextElem.innerText = challengeQuote;
+      // Store author on the displayed quote element so we can append it after success
+      quoteTextElem.title = "Quote from " + (quoteObj.author ? quoteObj.author : "the Developer");
+      const quoteInput = document.getElementById('quoteInput');
+      quoteInput.value = '';
+      quoteInput.onpaste = (e) => e.preventDefault();
+      quoteInput.ondragover = (e) => e.preventDefault();
+      quoteInput.ondrop = (e) => e.preventDefault();
+
+      document.getElementById('submitAnswer').innerText = 'Submit Quote';
+    }
+
+    function grantAccess(passed) {
+      document.getElementById('challengeText').innerHTML = 
+      passed ? '<p style="color:green;">Access Granted! You can now access the sites tab or import data.</p>' : 
+      `<p>Hard mode is not active on any blocked sites or search terms. Access is already granted to the sites tab, and importing data in the import/export tab is enabled.</p>`;
+      document.getElementById('sitesTab').disabled = false;
+      document.getElementById('sitesTab').removeAttribute('title');
+      document.getElementById('importButton').disabled = false;
+      document.getElementById('importButton').removeAttribute('title');
+      document.getElementById('mathProblems').style.display = 'none';
+      document.getElementById('submitAnswer').style.display = 'none';
+      if(!passed && !requestedStartupTab) {
+        openTab('Sites');
+      }
+    }
+
+    document.getElementById('submitAnswer').addEventListener('click', () => {
+      switch(challenge) {
+        case 'math':
+          const answers = Array.from(document.getElementsByClassName('answer-input')).map(input => parseInt(input.value));
+          const allCorrect = answers.length === correctAnswers.length && answers.every((ans, idx) => ans === correctAnswers[idx]);
+          if (allCorrect) {
+            document.getElementById('challengeText').innerText = 'If you want to access the sites tab or import data, you will need to type the following quote exactly as it appears.';
+            document.getElementById('mathProblems').style.display = 'none';
+            document.getElementById('quoteProblem').style.display = 'block';
+            generateQuote();
+            challenge = 'quote';
+          } else {
+            alert('Some answers are incorrect. Please try again.');
+          }
+          break;
+        case 'quote':
+          const quoteAnswer = document.getElementById('quoteInput').value.trim();
+          const expectedQuote = document.getElementById('quoteText').innerText.replace(/’/g, "'");
+          if (quoteAnswer === expectedQuote) {
+            grantAccess(true);
+            let authorText = document.getElementById('quoteText').title.replace(/^Quote from /, '');
+            if (authorText === 'the Developer') authorText = 'the Developer';
+            document.getElementById('quoteText').innerText += ' – ' + authorText;
+            document.getElementById('quoteInput').style.display = 'none';
+            document.getElementById('submitAnswer').style.display = 'none';
+          } else {
+            alert('This does not match. Please try again.');
+          }
+          break;
+        default:
+          alert('No challenge available.');
+      }
+    });
+
+    if(numProblems === 0 || blockerDisabled) {
+      grantAccess(false);
+    }
+
+    blocked.forEach(item => {
+      addItemToList(item, enabled.includes(item), favorites.includes(item), hardMode.includes(item));
+    });
+
+    // Set blocking options
+    backgroundColorSelect.value = data.blockedPageBgColor !== undefined ? data.blockedPageBgColor : "#1E3A5F";
+    confirmMessage.checked = data.enableConfirmMessage !== undefined ? data.enableConfirmMessage : true;
+    reasonInput.checked = data.enableReasonInput !== undefined ? data.enableReasonInput : false;
+    ubButtonDisabling.checked = data.enableUbButtonDisabling !== undefined ? data.enableUbButtonDisabling : false;
+    disableDuration.value = data.ubDisableDuration !== undefined ? data.ubDisableDuration : 15;
+    timeInput.checked = data.enableTimeInput !== undefined ? data.enableTimeInput : false;
+    tempUnblocking.checked = data.enableTempUnblocking !== undefined ? data.enableTempUnblocking : true;
+    nightMode.checked = data.enableNightMode !== undefined ? data.enableNightMode : true;
+    tempUbOptions.checked = data.enableTempUbOptions !== undefined ? data.enableTempUbOptions : false;
+    tempUbPopup.checked = data.enableTempUbPopup !== undefined ? data.enableTempUbPopup : false;
+    ubDuration.value = data.unblockDuration !== undefined ? data.unblockDuration : 5;
+    blockUrlSelect.value = data.saveBlockedUrls !== undefined ? data.saveBlockedUrls : "reason";
+    focusSelect.value = data.focusOption !== undefined ? data.focusOption : "close";
+    redirectField.value = data.redirectUrl !== undefined ? data.redirectUrl : "";
+    displayMessage.checked = data.enableMessage !== undefined ? data.enableMessage : false;
+    messageField.value = data.message !== undefined ? data.message : "You can do it! Stay focused!";
+    messageLinkField.value = data.messageLink !== undefined ? data.messageLink : "";
+    notiReblock.checked = data.enableNotiReblock !== undefined ? data.enableNotiReblock : false;
+    updateCheckboxState();
+    toggleFocusField();
+    
+    // Setup night mode checkbox state and visual indicators
+    setupNightModeUI();
+
+    if(isNightTime() && data.enableNightMode === true) {
+      document.getElementById('challengeSection').innerHTML = 
+        '<p style="color:red;">It is currently nighttime. You may not access the sites tab or import data at this time.</p>';
+    }
+  });
+
+  // Listen for changes in chrome.storage and update the blocked list in real time
+  chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === 'sync' && (changes.enabled || changes.blocked)) {
+      updateBlockedList();
+    }
+  });
+
+  function updateBlockedList() {
+    chrome.storage.sync.get(['blocked', 'enabled', 'favorites', 'hardMode'], (data) => {
+      blockedList.innerHTML = '';
+      const blocked = data.blocked || [];
+      const enabled = data.enabled || [];
+      const favorites = data.favorites || [];
+      const hardMode = data.hardMode || [];
+
+      blocked.forEach(item => {
+        addItemToList(item, enabled.includes(item), favorites.includes(item), hardMode.includes(item));
+      });
+    });
+  }
+
+  // Event listeners for blocking options
+  backgroundColorSelect.addEventListener('change', saveOptions);
+  confirmMessage.addEventListener('change', saveOptions);
+  reasonInput.addEventListener('change', saveOptions);
+  ubButtonDisabling.addEventListener('change', saveOptions);
+  disableDuration.addEventListener('change', saveOptions);
+  timeInput.addEventListener('change', saveOptions);
+  tempUnblocking.addEventListener('change', toggleTempUnblocking);
+  nightMode.addEventListener('change', handleNightModeChange);
+  tempUbOptions.addEventListener('change', saveOptions);
+  tempUbPopup.addEventListener('change', saveOptions);
+  ubDuration.addEventListener('change', saveOptions);
+  blockUrlSelect.addEventListener('change', saveOptions);
+  focusSelect.addEventListener('change', toggleFocusField);
+  document.getElementById("saveUrl").addEventListener('click', saveOptions);
+  displayMessage.addEventListener('click',updateCheckboxState);
+  document.getElementById("saveMessage").addEventListener('click', saveOptions);
+  document.getElementById("resetMessage").addEventListener('click', resetMessage);
+  notiReblock.addEventListener('change',saveOptions);
+
+  function toggleTempUnblocking() {
+    if (!tempUnblocking.checked) {
+      chrome.alarms.clearAll(() => {
+        chrome.storage.sync.get(null, (items) => {
+          let allKeys = Object.keys(items);
+          let keysToRemove = allKeys.filter(key => key.startsWith('reblock'));
+
+          chrome.storage.sync.remove(keysToRemove, () => {
+            if (chrome.runtime.lastError) {
+              console.error(chrome.runtime.lastError);
+            }
+          });
+        });
+      });
+    }
+    updateCheckboxState();
+  }
+
+  function handleNightModeChange() {
+    // If trying to uncheck during night time, prevent it and show alert
+    if (!nightMode.checked && isNightTime()) {
+      nightMode.checked = true; // Force it back to checked
+      alert("Night mode cannot be disabled during nighttime hours (9PM-4AM). This helps maintain healthy digital habits!");
+      return; // Don't save the change
+    }
+    // If checking or unchecking during day time, allow it
+    saveOptions();
+  }
+
+  function setupNightModeUI() {
+    const nightModeLabel = nightMode.nextElementSibling;
+    if (isNightTime() && nightMode.checked) {
+      // During night time, if night mode is checked, disable the checkbox and add visual indicator
+      nightMode.disabled = true;
+      nightModeLabel.style.color = '#888';
+      nightModeLabel.innerHTML = 'Enable Night Mode (Disable unblocking 9PM-4AM) <em style="color: #ff6b35;">- Locked during night hours</em>';
+    } else {
+      // During day time or if unchecked, keep it enabled
+      nightMode.disabled = false;
+      nightModeLabel.style.color = '';
+      nightModeLabel.innerHTML = 'Enable Night Mode (Disable unblocking 9PM-4AM)';
+    }
+  }
+
+  function updateCheckboxState() {
+    tempUbOptions.disabled = !tempUnblocking.checked ? true : false;
+    tempUbPopup.disabled = !tempUnblocking.checked ? true : false;
+    messageField.disabled = !displayMessage.checked ? true : false;
+    messageLinkField.disabled = !displayMessage.checked ? true : false;
+    saveOptions();
+  }
+
+  function isValidHttpUrl(value) {
+    if (!value) return false;
+    try {
+      const url = new URL(value);
+      return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function toggleFocusField() {
+    document.getElementById("redirectOptions").style.display = focusSelect.value === "redirect" ? "inline" : "none";
+    saveOptions();
+  }
+
+  function resetMessage() {
+    const resetMessage = "You can do it! Stay focused!"
+    chrome.storage.sync.set({ message: resetMessage, messageLink: '' });
+    messageField.value = resetMessage;
+    messageLinkField.value = '';
+  }
+
+  function saveOptions() {
+    const blockedPageBgColor = backgroundColorSelect.value;
+    const enableConfirmMessage = confirmMessage.checked;
+    const enableReasonInput = reasonInput.checked;
+    const enableUbButtonDisabling = ubButtonDisabling.checked;
+    const ubDisableDuration = disableDuration.value;
+    const enableTimeInput = timeInput.checked;
+    const enableTempUnblocking = tempUnblocking.checked;
+    const enableNightMode = nightMode.checked;
+    const enableTempUbOptions = tempUbOptions.disabled ? false : tempUbOptions.checked;
+    const enableTempUbPopup = tempUbPopup.disabled ? false : tempUbPopup.checked;
+    const unblockDuration = ubDuration.value;
+    const saveBlockedUrls = blockUrlSelect.value;
+    const focusOption = focusSelect.value;
+    const redirectUrl = redirectField.value;
+    const enableMessage = displayMessage.checked;
+    const message = messageField.value;
+    const messageLink = messageLinkField.value.trim();
+    const enableNotiReblock = notiReblock.checked;
+    const storedMessageLink = isValidHttpUrl(messageLink) ? messageLink : '';
+    if (messageLink && !storedMessageLink) {
+      alert('The message link is not valid. Only http:// and https:// URLs are accepted. The message has been saved without a link.');
+    }
+    chrome.storage.sync.set({ blockedPageBgColor, enableConfirmMessage, enableReasonInput, enableUbButtonDisabling, ubDisableDuration, 
+      enableTimeInput, enableTempUnblocking, enableNightMode, enableTempUbOptions, enableTempUbPopup, unblockDuration, saveBlockedUrls,
+      focusOption, redirectUrl, enableMessage, message, messageLink: storedMessageLink, enableNotiReblock });
+  }
+
+  addUrlButton.addEventListener('click', () => {
+    const url = addUrlInput.value.trim().toLowerCase();
+    const type = url.includes('.') ? 'website' : 'keyword';
+    if (url) {
+      addBlockedPattern(url, type);
+    }
+  });
+
+  function validateRegex(pattern) {
+    try {
+      new RegExp(pattern);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function formatPattern(pattern, type) {
+    if (type === 'website') {
+      pattern = `^https?://([^/?#]*\\.)?${escapePattern(pattern)}([/:?#]|$)`;
+    } else if (type === 'keyword') {
+      pattern = `(?:q|s|search_query)=(.*${escapePattern(pattern)}[^&]*)`;
+    }
+    return pattern;
+  }
+
+  function escapePattern(input) {
+    return input.replace(/\./g, '\\.').replace(/ /g, '+');
+  }
+
+  function getWebsiteDomainFromPattern(pattern) {
+    if (!pattern.startsWith('^https?://')) {
+      return null;
+    }
+
+    let domainPart = pattern
+      .replace(/^\^https\?:\/\/\+\(\[\^:\/\]\+\\\.\)\?/, '')
+      .replace(/^\^https\?:\/\/\(\[\^\/\?#\]\*\\\.\)\?/, '')
+      .replace(/\[:\/\]$/, '')
+      .replace(/\(\[\/:\?#\]\|\$\)$/, '')
+      .replace(/\\\./g, '.');
+
+    if (!/^[a-z0-9.-]+$/i.test(domainPart)) {
+      return null;
+    }
+
+    return domainPart || null;
+  }
+
+  function isPatternTooBroad(pattern) {
+    return pattern.length < 4 || pattern.includes('.*') || pattern.includes('.*?') || pattern.includes('.+');
+  }
+
+  function addBlockedPattern(pattern, type) {
+    if (isPatternTooBroad(pattern)) {
+      alert(`Keyword is too broad.\nTo block the whole word: \\b${pattern}\\b\nTo block just the start: \\b${pattern}\nTo block just the end: ${pattern}\\b`);
+      return;
+    }
+    pattern = formatPattern(pattern, type);
+
+    if (!validateRegex(pattern)) {
+      alert("Invalid regular expression. Please try again.");
+      return;
+    }
+    // Add the pattern to the blocked list and the enabled list
+    chrome.storage.sync.get(['blocked', 'enabled'], (data) => {
+      const blocked = data.blocked || [];
+      let enabled = data.enabled || [];
+      if (!blocked.includes(pattern)) {
+        blocked.push(pattern);
+        if (!enabled.includes(pattern)) {
+          enabled.push(pattern);
+        }
+        chrome.storage.sync.set({ blocked, enabled, [`blockedTimestamp_${getDisplayText(pattern)}`]: Date.now() }, () => {
+          addItemToList(pattern, true);
+        });
+      }
+    });
+  }
+
+  function getDisplayText(pattern) {
+    let displayText = pattern;
+    if (pattern.startsWith('^https?://')) {
+      displayText = getWebsiteDisplayTextFromPattern(pattern) || displayText;
+    } else if (pattern.startsWith('(?:q|s|search_query)=')) {
+      displayText = displayText.replace("(?:q|s|search_query)=(.*", '');
+      displayText = displayText.replace("[^&]*)", '');
+    }
+    return displayText;
+  }
+
+  function getWebsiteDisplayTextFromPattern(pattern) {
+    if (!pattern.startsWith('^https?://')) {
+      return null;
+    }
+
+    let displayText = pattern
+      .replace(/^\^https\?:\/\/\+\(\[\^:\/\]\+\\\.\)\?/, '')
+      .replace(/^\^https\?:\/\/\(\[\^\/\?#\]\*\\\.\)\?/, '')
+      .replace(/\(\[\/:\?#\]\|\$\)$/, '')
+      .replace(/\(\?:\[\/:\?#\]\.\*\)\?\$$/, '')
+      .replace(/\[:\/\]$/, '')
+      .replace(/\\\./g, '.')
+      .replace(/\\\//g, '/');
+
+    return displayText || null;
+  }
+
+  function addItemToList(pattern, isEnabled, isFavorite, hardMode) {
+    const listItem = document.createElement('li');
+    listItem.draggable = true;
+
+    const dragHandle = document.createElement('span');
+    dragHandle.textContent = '☰';
+    dragHandle.className = 'drag-handle';
+
+    const itemText = document.createElement('span');
+    const type = pattern.includes('^https?://') ? '🌐' : '🔍';
+    const displayText = getDisplayText(pattern);
+    itemText.textContent = `${type} ${displayText}`;
+    itemText.classList.add('text');
+    if (!isEnabled) {
+      itemText.classList.add('disabled');
+    }
+
+    const favoriteButton = document.createElement('span');
+    favoriteButton.textContent = isFavorite ? '★' : '☆';
+    favoriteButton.className = 'star';
+    favoriteButton.addEventListener('click', () => {
+      toggleFavorite(pattern, favoriteButton)
+    })
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = isEnabled;
+    checkbox.addEventListener('change', () => {
+      toggleItem(pattern, checkbox.checked, itemText);
+    });
+
+    const hardModeButton = document.createElement('button');
+    hardModeButton.textContent = hardMode ? 'Hard' : 'Easy';
+    hardModeButton.className = hardMode ? 'hard' : 'easy';
+    hardModeButton.addEventListener('click', () => {
+      toggleHardMode(pattern, hardModeButton);
+    });
+
+    const editButton = document.createElement('button');
+    editButton.textContent = 'Edit';
+    editButton.addEventListener('click', () => {
+      editItem(pattern, listItem, itemText);
+    });
+
+    const deleteButton = document.createElement('button');
+    deleteButton.textContent = 'Delete';
+    deleteButton.addEventListener('click', () => {
+      deleteItem(pattern, listItem);
+    });
+
+    listItem.appendChild(dragHandle);
+    listItem.appendChild(favoriteButton);
+    listItem.appendChild(checkbox);
+    listItem.appendChild(itemText);
+    listItem.appendChild(hardModeButton);
+    listItem.appendChild(editButton);
+    listItem.appendChild(deleteButton);
+
+    listItem.addEventListener('dragstart', handleDragStart);
+    listItem.addEventListener('dragover', handleDragOver);
+    listItem.addEventListener('drop', handleDrop);
+    listItem.addEventListener('dragend', handleDragEnd);
+
+    blockedList.appendChild(listItem);
+  }
+
+  function toggleFavorite(pattern, button) {
+    chrome.storage.sync.get(['blocked', 'favorites'], (data) => {
+      let blocked = data.blocked || [];
+      let favorites = data.favorites || [];
+      if (button.textContent === '☆') {
+        if (!favorites.includes(pattern)) {
+          favorites.push(pattern);
+          favorites.sort((a, b) => blocked.indexOf(a) - blocked.indexOf(b));
+        }
+        button.textContent = '★';
+      } else {
+        favorites = favorites.filter(item => item !== pattern);
+        button.textContent = '☆';
+      }
+      chrome.storage.sync.set({ favorites });
+    });
+  }
+
+  function toggleHardMode(pattern, button) {
+    chrome.storage.sync.get(['hardMode'], (data) => {
+      let hardMode = data.hardMode || [];
+      if (!hardMode.includes(pattern)) {
+        hardMode.push(pattern);
+        button.textContent = 'Hard';
+        button.className = 'hard';
+      } else {
+        hardMode = hardMode.filter(item => item !== pattern);
+        button.textContent = 'Easy';
+        button.className = 'easy';
+      }
+      chrome.storage.sync.set({ hardMode });
+    });
+  }
+
+  function toggleItem(pattern, isEnabled, itemText) {
+    const displayPattern = getDisplayText(pattern);
+    chrome.storage.sync.get(['enabled', `blockedTimestamp_${displayPattern}`], (data) => {
+      let enabled = data.enabled || [];
+      if (isEnabled) {
+        if (!enabled.includes(pattern)) {
+          enabled.push(pattern);
+          if (!data[`blockedTimestamp_${displayPattern}`]) {
+            chrome.storage.sync.set({ [`blockedTimestamp_${displayPattern}`]: Date.now() });
+          }
+        }
+        itemText.classList.remove('disabled');
+      } else {
+        enabled = enabled.filter(item => item !== pattern);
+        itemText.classList.add('disabled');
+      }
+      chrome.storage.sync.set({ enabled }, () => {
+        if (isEnabled) {
+          const alarmName = `reblock_${displayPattern}`;
+          deleteAlarm(alarmName);
+        }
+      });
+    });
+  }
+
+  function deleteAlarm(alarmName) {
+    chrome.alarms.clear(alarmName, (wasCleared) => {
+      if (wasCleared) {
+        chrome.storage.sync.remove(alarmName);
+      }
+    });
+  }
+
+  function editItem(oldPattern, listItem, itemText) {
+    const displayText = getDisplayText(oldPattern);
+    const blockedList = document.getElementById('blockedSitesList');
+    const listItems = blockedList.querySelectorAll('li');
+
+    if (blockedList.querySelectorAll('button.save').length === 0) {
+      listItems.forEach(li => {
+        li.setAttribute('draggable', 'false');
+      });
+    }
+    const type = oldPattern.includes('^https?://') ? '🌐' : '🔍';
+
+    // Create edit input
+    const editInput = document.createElement('input');
+    editInput.type = 'text';
+    editInput.value = displayText;
+    editInput.className = 'edit-input';
+
+    // Create save button
+    const saveButton = document.createElement('button');
+    saveButton.textContent = 'Save';
+    saveButton.className = 'save';
+    saveButton.addEventListener('click', () => {
+      const newDisplayText = editInput.value.trim();
+      if (isPatternTooBroad(newDisplayText)) {
+        alert("This pattern is too broad and may block unintended URLs. Please make it more specific.");
+        revertToDisplayMode();
+        return;
+      }
+      if (newDisplayText && newDisplayText !== displayText) {
+        const newPattern = newDisplayText.includes('.') ? formatPattern(newDisplayText, 'website') : formatPattern(newDisplayText, 'keyword');
+
+        if (!validateRegex(newPattern)) {
+          alert("Invalid regular expression. Please try again.");
+          revertToDisplayMode();
+          return;
+        }
+        updatePattern(oldPattern, newPattern, listItem, itemText);
+      } else {
+        // If no changes, revert back to display mode
+        revertToDisplayMode();
+      }
+    });
+
+    // Replace text and buttons with edit input and save button
+    listItem.replaceChild(editInput, itemText);
+    listItem.replaceChild(saveButton, listItem.querySelector('button:nth-of-type(1)'));
+    listItem.removeChild(listItem.querySelector('button:nth-of-type(2)'));
+
+    // Focus on the input
+    editInput.focus();
+
+    function revertToDisplayMode() {
+      listItem.replaceChild(itemText, editInput);
+      const blockedList = document.getElementById('blockedSitesList');
+      const listItems = blockedList.querySelectorAll('li');
+
+      if (blockedList.querySelectorAll('button.save').length <= 1) {
+        listItems.forEach(li => {
+          li.setAttribute('draggable', 'true');
+        });
+      }
+
+      const editButton = document.createElement('button');
+      editButton.textContent = 'Edit';
+      editButton.addEventListener('click', () => {
+        editItem(oldPattern, listItem, itemText);
+      });
+      listItem.replaceChild(editButton, saveButton);
+      const deleteButton = document.createElement('button');
+      deleteButton.textContent = 'Delete';
+      deleteButton.addEventListener('click', () => {
+        deleteItem(oldPattern, listItem);
+      });
+      listItem.appendChild(deleteButton);
+    }
+  }
+
+  function updatePattern(oldPattern, newPattern, listItem, itemText) {
+    chrome.storage.sync.get(['blocked', 'enabled', 'favorites'], (data) => {
+      let blocked = data.blocked || [];
+      let enabled = data.enabled || [];
+      let favorites = data.favorites || [];
+
+      const oldIndex = blocked.indexOf(oldPattern);
+      if (oldIndex !== -1) {
+        blocked[oldIndex] = newPattern;
+      }
+
+      const enabledIndex = enabled.indexOf(oldPattern);
+      if (enabledIndex !== -1) {
+        enabled[enabledIndex] = newPattern;
+      }
+
+      const favoritesIndex = favorites.indexOf(oldPattern);
+      if (favoritesIndex !== -1) {
+        favorites[favoritesIndex] = newPattern;
+      }
+
+      chrome.storage.sync.remove(`blockedTimestamp_${getDisplayText(oldPattern)}`);
+
+      const alarmName = `reblock_${getDisplayText(oldPattern)}`;
+      deleteAlarm(alarmName);
+
+      chrome.storage.sync.set({ blocked, enabled, favorites, [`blockedTimestamp_${getDisplayText(newPattern)}`]: Date.now() }, () => {
+        const type = newPattern.includes('^https?://') ? '🌐' : '🔍';
+        const displayText = getDisplayText(newPattern);
+        itemText.textContent = `${type} ${displayText}`;
+        listItem.replaceChild(itemText, listItem.querySelector('.edit-input'));
+
+        const editButton = document.createElement('button');
+        editButton.textContent = 'Edit';
+        editButton.addEventListener('click', () => {
+          editItem(newPattern, listItem, itemText);
+        });
+        listItem.replaceChild(editButton, listItem.querySelector('button:nth-of-type(1)'));
+
+        const deleteButton = document.createElement('button');
+        deleteButton.textContent = 'Delete';
+        deleteButton.addEventListener('click', () => {
+          deleteItem(newPattern, listItem);
+        });
+        listItem.appendChild(deleteButton);
+      });
+    });
+  }
+
+  function deleteItem(pattern, listItem) {
+    if (confirm("Are you sure you want to delete this item?")) {
+      chrome.storage.sync.get(['blocked', 'enabled', 'favorites', 'hardMode'], (data) => {
+        const blocked = data.blocked.filter(item => item !== pattern);
+        const enabled = data.enabled.filter(item => item !== pattern);
+        const favorites = data.favorites.filter(item => item !== pattern);
+        const hardMode = data.hardMode.filter(item => item !== pattern);
+        chrome.storage.sync.set({ blocked, enabled, favorites, hardMode }, () => {
+          listItem.remove();
+          chrome.storage.sync.remove(`blockedTimestamp_${getDisplayText(pattern)}`);
+          const alarmName = `reblock_${getDisplayText(pattern)}`;
+          deleteAlarm(alarmName);
+        });
+      });
+    }
+  }
+
+  function handleDragStart(e) {
+    draggedItem = this;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', this.innerHTML);
+    this.style.opacity = '0.4';
+  }
+
+  function handleDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    return false;
+  }
+
+  function handleDrop(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    const targetItem = e.target.closest('li');
+    const draggedList = draggedItem.parentNode; // Get the list the dragged item belongs to
+    const targetList = targetItem ? targetItem.parentNode : null;
+    if (targetList && draggedList === targetList && draggedItem !== targetItem) {
+      const rect = targetItem.getBoundingClientRect();
+      const middleY = rect.top + rect.height / 2;
+      if (e.clientY > middleY) {
+        targetItem.parentNode.insertBefore(draggedItem, targetItem.nextSibling);
+      } else {
+        targetItem.parentNode.insertBefore(draggedItem, targetItem);
+      }
+    } else if (!targetItem) {
+      // Append to the end of the list if dropped on empty space
+      draggedList.appendChild(draggedItem);
+    }
+    // Update the order in storage based on the list type (blocked or productive)
+    if (draggedList.id === 'blockedSitesList') {
+      updateBlockedOrder(); // Update blocked site order
+    } else if (draggedList.id === 'productiveSitesList') {
+      updateProductiveOrder(); // Update productive URLs order
+    } else if (draggedList.id === 'dailyGoalsList') {
+      updateDailyGoalOrder();
+    }
+    return false;
+  }
+
+  function handleDragEnd() {
+    this.style.opacity = '1';
+    draggedItem = null;
+  }
+
+  function updateBlockedOrder() {
+    const newOrder = Array.from(blockedList.children).map(li => {
+      const itemText = li.querySelector('.text').textContent;
+      return itemText.slice(2).trim(); // Remove emoji and trim
+    });
+
+    chrome.storage.sync.get(['blocked', 'enabled', 'favorites'], (data) => {
+      const oldBlocked = data.blocked || [];
+      const enabled = data.enabled || [];
+      const favorites = data.favorites || [];
+
+      // Create a map of display text to original pattern
+      const patternMap = new Map(oldBlocked.map(pattern => [getDisplayText(pattern), pattern]));
+
+      // Create the new blocked array based on the new order
+      const newBlocked = newOrder.map(displayText => patternMap.get(displayText));
+
+      favorites.sort((a, b) => newBlocked.indexOf(a) - newBlocked.indexOf(b));
+
+      chrome.storage.sync.set({ blocked: newBlocked, enabled, favorites });
+    });
+  }
+
+  function updateProductiveOrder() {
+    saveProductiveSites();
+  }
+
+  function getTodayDate() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  function isDailyGoalCompletedToday(goal) {
+    return goal.completedDate === getTodayDate();
+  }
+
+  function normalizeDailyGoalUrl(url) {
+    const trimmed = url.trim();
+    if (!trimmed) return '';
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    return `https://${trimmed}`;
+  }
+
+  function createDailyGoal(title, url) {
+    return {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      title,
+      url,
+      completedDate: ''
+    };
+  }
+
+  function resetDailyGoalsIfNeeded(callback) {
+    chrome.runtime.sendMessage({ action: 'resetDailyGoals' }, () => {
+      callback();
+    });
+  }
+
+  addDailyGoalButton.addEventListener('click', () => {
+    const title = addDailyGoalTitle.value.trim();
+    const url = normalizeDailyGoalUrl(addDailyGoalUrl.value);
+
+    if (!title) {
+      alert('Please enter a habit name.');
+      return;
+    }
+
+    if (url) {
+      try {
+        new URL(url);
+      } catch (e) {
+        alert('Please enter a valid URL.');
+        return;
+      }
+    }
+
+    chrome.storage.sync.get(['dailyGoals'], (data) => {
+      const dailyGoals = data.dailyGoals || [];
+      dailyGoals.push(createDailyGoal(title, url));
+      chrome.storage.sync.set({ dailyGoals }, () => {
+        addDailyGoalTitle.value = '';
+        addDailyGoalUrl.value = '';
+        loadDailyGoals();
+      });
+    });
+  });
+
+  function loadDailyGoals() {
+    resetDailyGoalsIfNeeded(() => chrome.storage.sync.get(['dailyGoals'], (data) => {
+      const dailyGoals = data.dailyGoals || [];
+      const dailyGoalsList = document.getElementById('dailyGoalsList');
+      dailyGoalsList.innerHTML = '';
+
+      dailyGoals.forEach(goal => {
+        addDailyGoalToList(goal);
+      });
+      adjustDailyGoalColumnWidths();
+    }));
+  }
+
+  function addDailyGoalToList(goal) {
+    const dailyGoalsList = document.getElementById('dailyGoalsList');
+    const listItem = document.createElement('li');
+    listItem.draggable = true;
+    listItem.dataset.goalId = goal.id;
+
+    const dragHandle = document.createElement('span');
+    dragHandle.textContent = '☰';
+    dragHandle.className = 'drag-handle';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = isDailyGoalCompletedToday(goal);
+    checkbox.title = 'Completed today';
+    checkbox.addEventListener('change', () => {
+      toggleDailyGoal(goal.id, checkbox.checked);
+    });
+
+    const nameText = document.createElement('span');
+    nameText.textContent = goal.title || 'Habit';
+    nameText.classList.add('name');
+    if (checkbox.checked) {
+      nameText.classList.add('disabled');
+    }
+
+    const urlText = goal.url ? document.createElement('a') : document.createElement('span');
+    if (goal.url) {
+      urlText.href = goal.url;
+    }
+    urlText.textContent = goal.url || 'No URL';
+    urlText.classList.add('text');
+
+    const buttonGroup = document.createElement('div');
+    buttonGroup.className = 'button-group';
+
+    const editButton = document.createElement('button');
+    editButton.textContent = 'Edit';
+    editButton.addEventListener('click', () => {
+      editDailyGoal(goal);
+    });
+
+    const deleteButton = document.createElement('button');
+    deleteButton.textContent = 'Delete';
+    deleteButton.addEventListener('click', () => {
+      deleteDailyGoal(goal.id, goal.title);
+    });
+
+    buttonGroup.appendChild(editButton);
+    buttonGroup.appendChild(deleteButton);
+
+    listItem.appendChild(dragHandle);
+    listItem.appendChild(checkbox);
+    listItem.appendChild(nameText);
+    listItem.appendChild(urlText);
+    listItem.appendChild(buttonGroup);
+
+    listItem.addEventListener('dragstart', handleDragStart);
+    listItem.addEventListener('dragover', handleDragOver);
+    listItem.addEventListener('drop', handleDrop);
+    listItem.addEventListener('dragend', handleDragEnd);
+
+    dailyGoalsList.appendChild(listItem);
+  }
+
+  function toggleDailyGoal(goalId, completed) {
+    chrome.storage.sync.get(['dailyGoals'], (data) => {
+      const dailyGoals = data.dailyGoals || [];
+      const updatedGoals = dailyGoals.map(goal => {
+        if (goal.id !== goalId) return goal;
+        return {
+          ...goal,
+          completedDate: completed ? getTodayDate() : ''
+        };
+      });
+      chrome.storage.sync.set({ dailyGoals: updatedGoals }, loadDailyGoals);
+    });
+  }
+
+  function editDailyGoal(goal) {
+    const newTitle = prompt('Habit name:', goal.title || 'Habit');
+    if (newTitle === null) return;
+
+    const trimmedTitle = newTitle.trim();
+    if (!trimmedTitle) {
+      alert('Please enter a habit name.');
+      return;
+    }
+
+    const newUrl = prompt('Habit URL (optional):', goal.url || '');
+    if (newUrl === null) return;
+
+    const normalizedUrl = normalizeDailyGoalUrl(newUrl);
+    if (normalizedUrl) {
+      try {
+        new URL(normalizedUrl);
+      } catch (e) {
+        alert('Please enter a valid URL.');
+        return;
+      }
+    }
+
+    chrome.storage.sync.get(['dailyGoals'], (data) => {
+      const dailyGoals = data.dailyGoals || [];
+      const updatedGoals = dailyGoals.map(existingGoal => {
+        if (existingGoal.id !== goal.id) return existingGoal;
+        return {
+          ...existingGoal,
+          title: trimmedTitle,
+          url: normalizedUrl
+        };
+      });
+      chrome.storage.sync.set({ dailyGoals: updatedGoals }, loadDailyGoals);
+    });
+  }
+
+  function deleteDailyGoal(goalId, title) {
+    if (!confirm(`Are you sure you want to delete ${title || 'this habit'}?`)) return;
+
+    chrome.storage.sync.get(['dailyGoals'], (data) => {
+      const dailyGoals = data.dailyGoals || [];
+      chrome.storage.sync.set({
+        dailyGoals: dailyGoals.filter(goal => goal.id !== goalId)
+      }, loadDailyGoals);
+    });
+  }
+
+  function updateDailyGoalOrder() {
+    const orderedGoalIds = Array.from(document.getElementById('dailyGoalsList').children).map(li => li.dataset.goalId);
+
+    chrome.storage.sync.get(['dailyGoals'], (data) => {
+      const dailyGoals = data.dailyGoals || [];
+      dailyGoals.sort((a, b) => orderedGoalIds.indexOf(a.id) - orderedGoalIds.indexOf(b.id));
+      chrome.storage.sync.set({ dailyGoals }, () => {
+        adjustDailyGoalColumnWidths();
+      });
+    });
+  }
+
+  function adjustDailyGoalColumnWidths() {
+    const dailyGoalsList = document.getElementById('dailyGoalsList');
+
+    let longestName = 0;
+    let longestUrl = 0;
+
+    Array.from(dailyGoalsList.children).forEach(li => {
+      const name = li.querySelector('.name').textContent;
+      const url = li.querySelector('.text').textContent;
+
+      const nameWidth = getTextWidth(name, '12px Arial');
+      const urlWidth = getTextWidth(url, '12px Arial');
+
+      if (nameWidth > longestName) longestName = nameWidth;
+      if (urlWidth > longestUrl) longestUrl = urlWidth;
+    });
+
+    longestName += 20;
+    longestUrl += 20;
+
+    Array.from(dailyGoalsList.children).forEach(li => {
+      li.style.gridTemplateColumns = `20px 28px ${longestName}px ${longestUrl}px auto`;
+    });
+  }
+
+  function loadAnalytics() {
+    chrome.storage.local.get(['blockedCounts', 'unblockCounts'], (data) => {
+      const blockedCounts = data.blockedCounts || {};
+      const unblockCounts = data.unblockCounts || {};
+  
+      const analyticsArray = [];
+      const seenKeys = new Set();
+      const missingUnblockCutoff = '2026-06-23';
+  
+      function makeKey(date, pattern) {
+        return `${date}|${pattern}`;
+      }
+  
+      Object.keys(blockedCounts).forEach(date => {
+        const countsForDate = blockedCounts[date];
+        Object.keys(countsForDate).forEach(pattern => {
+          const unblockValue = (unblockCounts[date] && Object.prototype.hasOwnProperty.call(unblockCounts[date], pattern))
+            ? unblockCounts[date][pattern]
+            : null;
+          analyticsArray.push({
+            date,
+            pattern,
+            blockCount: countsForDate[pattern],
+            unblockCount: unblockValue
+          });
+          seenKeys.add(makeKey(date, pattern));
+        });
+      });
+  
+      Object.keys(unblockCounts).forEach(date => {
+        const countsForDate = unblockCounts[date];
+        Object.keys(countsForDate).forEach(pattern => {
+          const key = makeKey(date, pattern);
+          if (!seenKeys.has(key)) {
+            analyticsArray.push({
+              date,
+              pattern,
+              blockCount: 0,
+              unblockCount: countsForDate[pattern]
+            });
+            seenKeys.add(key);
+          }
+        });
+      });
+  
+      // Function to remove "www." and "\b" from the display text
+      function removeWwwB(pattern) {
+        return pattern.replace(/^www\./, '').replace(/^\\b/, '');
+      }
+  
+      // Sort the array by date in descending order, then by block count in descending order, then by pattern ignoring "\b" and "www."
+      analyticsArray.sort((a, b) => {
+        const dateComparison = new Date(b.date) - new Date(a.date);
+        if (dateComparison !== 0) return dateComparison;
+  
+        const countComparison = b.blockCount - a.blockCount;
+        if (countComparison !== 0) return countComparison;
+  
+        const patternA = removeWwwB(getDisplayText(a.pattern));
+        const patternB = removeWwwB(getDisplayText(b.pattern));
+        return patternA.localeCompare(patternB);
+      });
+  
+      // Set table
+      const tableBody = document.getElementById('analyticsTableBody');
+      tableBody.innerHTML = '';
+  
+      analyticsArray.forEach(entry => {
+        const row = document.createElement('tr');
+        const patternCell = document.createElement('td');
+        const dateCell = document.createElement('td');
+        const blockCell = document.createElement('td');
+        const unblockCell = document.createElement('td');
+  
+        patternCell.textContent = getDisplayText(entry.pattern);
+        dateCell.textContent = entry.date;
+        blockCell.textContent = entry.blockCount;
+        if (entry.unblockCount === null) {
+          unblockCell.textContent = entry.date < missingUnblockCutoff ? '?' : '0';
+        } else {
+          unblockCell.textContent = entry.unblockCount;
+        }
+  
+        row.appendChild(patternCell);
+        row.appendChild(dateCell);
+        row.appendChild(blockCell);
+        row.appendChild(unblockCell);
+        tableBody.appendChild(row);
+      });
+    });
+  }
+
+  // Load analytics when the Analytics tab is opened
+  analyticsTab.addEventListener('click', loadAnalytics);
+
+  function loadSavedUrls() {
+    chrome.storage.local.get(['savedUrls'], (data) => {
+      let savedUrls = data.savedUrls || {};
+
+      // Remove entries older than 30 days
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const cutoffDate = thirtyDaysAgo.toISOString().split('T')[0];
+
+      savedUrls = Object.fromEntries(
+        Object.entries(savedUrls).filter(([date]) => date >= cutoffDate)
+      );
+
+      const savedUrlsBody = document.getElementById('savedUrlsBody');
+      savedUrlsBody.innerHTML = ''; // Clear any existing rows
+
+      // Convert savedUrls object to an array of {date, url, patterns, reason} objects
+      const savedUrlsArray = [];
+      Object.keys(savedUrls).forEach(date => {
+        savedUrls[date].forEach(entry => {
+          savedUrlsArray.push({ date, ...entry });
+        });
+      });
+
+      // Sort the array by date in descending order
+      savedUrlsArray.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+      // Populate the table
+      savedUrlsArray.forEach(entry => {
+        const row = document.createElement('tr');
+        
+        const urlCell = document.createElement('td');
+        urlCell.textContent = entry.url;
+        
+        const patternsCell = document.createElement('td');
+        patternsCell.textContent = entry.patterns.map(getDisplayText).join(', ');
+        
+        const dateCell = document.createElement('td');
+        dateCell.textContent = entry.date;
+        
+        const reasonsCell = document.createElement('td');
+        reasonsCell.innerText = entry.reason.replace(/; /g, '\n');
+        
+        const deleteCell = document.createElement('td');
+        const deleteButton = document.createElement('button');
+        deleteButton.textContent = '×';
+        deleteButton.addEventListener('click', () => {
+          deleteSavedUrl(entry.date, entry.url);
+        });
+        deleteCell.appendChild(deleteButton);
+
+        row.appendChild(urlCell);
+        row.appendChild(patternsCell);
+        row.appendChild(dateCell);
+        row.appendChild(reasonsCell);
+        row.appendChild(deleteCell);
+
+        savedUrlsBody.appendChild(row);
+      });
+    });
+  }
+
+  // Function to delete a saved URL
+  function deleteSavedUrl(date, url) {
+    chrome.storage.local.get(['savedUrls'], (data) => {
+      let savedUrls = data.savedUrls || {};
+      if (savedUrls[date]) {
+        savedUrls[date] = savedUrls[date].filter(entry => entry.url !== url);
+        if (savedUrls[date].length === 0) {
+          delete savedUrls[date];
+        }
+        chrome.storage.local.set({ savedUrls }, () => {
+          loadSavedUrls(); // Reload the table after deletion
+        });
+      }
+    });
+  }
+
+  // Function to delete all saved URLs
+  document.getElementById('deleteAllUrlsButton').addEventListener('click', () => {
+    if(confirm(`Are you sure you want to delete all saved URLs? This cannot be undone.`)) {
+      chrome.storage.local.remove('savedUrls', () => {
+        loadSavedUrls(); // Reload the table after deletion
+      });
+    }
+  });
+
+  // Load saved URLs when the Saved URLs tab is opened
+  savedUrlsTab.addEventListener('click', loadSavedUrls);
+
+  addProductiveButton.addEventListener('click', () => {
+    const url = addProductiveInput.value.trim();
+    if (url.startsWith('https://')) {
+      // Add the valid URL to the list
+      let name = prompt("Name this site.", "Productive Site");
+      addProductiveUrlToList(url, name, true);
+    } else {
+      alert('Please enter a valid URL that starts with https://');
+    }
+  });
+
+  function addProductiveUrlToList(url, name = '', adding) {
+    const productiveSitesList = document.getElementById('productiveSitesList');
+
+    // Create a new list item for the URL
+    const listItem = document.createElement('li');
+    listItem.draggable = true;
+
+    // Drag handle for reordering
+    const dragHandle = document.createElement('span');
+    dragHandle.textContent = '☰';
+    dragHandle.className = 'drag-handle';
+
+    // Display URL
+    const itemText = document.createElement('a');
+    itemText.href = url;
+    itemText.textContent = url;
+    itemText.classList.add('text');
+
+    // Optional name
+    const nameText = document.createElement('span');
+    nameText.textContent = name || 'Productive Site';
+    nameText.classList.add('name');
+
+    // Group buttons in a flex container
+    const buttonGroup = document.createElement('div');
+    buttonGroup.className = 'button-group'
+
+    // Edit URL button
+    const editUrlButton = document.createElement('button');
+    editUrlButton.textContent = 'Edit URL';
+    editUrlButton.addEventListener('click', () => {
+      const newUrl = prompt('Enter new URL:', url);
+      if (newUrl && newUrl.startsWith('https://')) {
+        itemText.textContent = newUrl;
+        url = newUrl; // Update the URL in this list item
+        saveProductiveSites(); // Save changes to chrome.storage.sync
+      } else {
+        alert('Please enter a valid URL that starts with https://');
+      }
+    });
+
+    // Edit Name button
+    const editNameButton = document.createElement('button');
+    editNameButton.textContent = 'Edit Name';
+    editNameButton.addEventListener('click', () => {
+      const newName = prompt('Enter new name:', nameText.textContent);
+      if (newName) {
+        nameText.textContent = newName;
+        name = newName; // Update the name in this list item
+        saveProductiveSites(); // Save changes to chrome.storage.sync
+      }
+    });
+
+    // Delete button
+    const deleteButton = document.createElement('button');
+    deleteButton.textContent = 'Delete';
+    deleteButton.addEventListener('click', () => {
+      if (confirm(`Are you sure you want to delete ${url}?`)) {
+        listItem.remove();
+        saveProductiveSites(); // Save changes to chrome.storage.sync after deletion
+      }
+    });
+
+    //Append buttons to the button group
+    buttonGroup.appendChild(editUrlButton);
+    buttonGroup.appendChild(editNameButton);
+    buttonGroup.appendChild(deleteButton);
+
+    // Append all elements to the list item
+    listItem.appendChild(dragHandle);
+    listItem.appendChild(itemText);
+    listItem.appendChild(nameText);
+    listItem.appendChild(buttonGroup)
+
+    // Add drag and drop event listeners for reordering
+    listItem.addEventListener('dragstart', handleDragStart);
+    listItem.addEventListener('dragover', handleDragOver);
+    listItem.addEventListener('drop', handleDrop);
+    listItem.addEventListener('dragend', handleDragEnd);
+
+    // Append the new list item to the productiveSitesList
+    productiveSitesList.appendChild(listItem);
+
+    // Save to chrome.storage.sync after adding
+    if(adding) saveProductiveSites();
+    else adjustColumnWidths();
+  }
+
+  function saveProductiveSites() {
+    const productiveSitesList = document.getElementById('productiveSitesList');
+    const productiveSitesArray = Array.from(productiveSitesList.children).map(li => {
+      return {
+        url: li.querySelector('.text').textContent.trim(), // URL
+        name: li.querySelector('.name').textContent.trim()  // Name
+      };
+    });
+
+    // Save to chrome.storage.sync
+    chrome.storage.sync.set({ productiveSites: productiveSitesArray });
+
+    adjustColumnWidths();
+  }
+
+  function loadProductiveSites() {
+    chrome.storage.sync.get(['productiveSites'], (data) => {
+      const productiveSitesArray = data.productiveSites || [];
+      const productiveSitesList = document.getElementById('productiveSitesList');
+      
+      // Clear current list
+      productiveSitesList.innerHTML = '';
+
+      // Add each productive site back to the list
+      productiveSitesArray.forEach(site => {
+        addProductiveUrlToList(site.url, site.name, false);
+      });
+    });
+  }
+
+  // Load productive sites when the Productive URLs tab is clicked
+  document.getElementById('productiveUrlsTab').addEventListener('click', loadProductiveSites);
+
+  function adjustColumnWidths() {
+    const productiveSitesList = document.getElementById('productiveSitesList');
+    
+    let longestUrl = 0;
+    let longestName = 0;
+  
+    // Calculate the longest URL and Name widths
+    Array.from(productiveSitesList.children).forEach(li => {
+      const url = li.querySelector('.text').textContent;
+      const name = li.querySelector('.name').textContent;
+  
+      const urlWidth = getTextWidth(url, '12px Arial'); // Adjust the font and size if needed
+      const nameWidth = getTextWidth(name, '12px Arial');
+  
+      if (urlWidth > longestUrl) longestUrl = urlWidth;
+      if (nameWidth > longestName) longestName = nameWidth;
+    });
+  
+    // Add some padding (n + m pixels) to the calculated widths
+    longestUrl += 20;  // Add extra space for padding
+    longestName += 20; // Add extra space for padding
+  
+    // Apply the calculated width to all URL and Name columns
+    Array.from(productiveSitesList.children).forEach(li => {
+      li.style.gridTemplateColumns = `20px ${longestUrl}px ${longestName}px auto`;
+    });
+  }
+  
+  function getTextWidth(text, font) {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    context.font = font;
+    const metrics = context.measureText(text);
+    return metrics.width;
+  }
+
+  document.getElementById('exportButton').addEventListener('click', exportData);
+  document.getElementById('importButton').addEventListener('click', () => {
+    document.getElementById('importFile').click();
+  });
+  document.getElementById('importFile').addEventListener('change', importData);
+
+  function exportData() {
+    chrome.storage.sync.get(null, (syncData) => {
+      chrome.storage.local.get(null, (localData) => {
+        const data = {
+          sync: syncData,
+          local: localData
+        };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'websiteBlockerUserData.json';
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+    });
+  }
+
+  function importData(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const data = JSON.parse(e.target.result);
+      if (data.sync) {
+        chrome.storage.sync.set(data.sync, () => {
+          alert('Sync data imported');
+        });
+      }
+      if (data.local) {
+        chrome.storage.local.set(data.local, () => {
+          alert('Local data imported');
+        });
+      }
+    };
+    reader.readAsText(file);
+  }
+});

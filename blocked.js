@@ -1,0 +1,1104 @@
+let currentBlockedUrl = null;
+
+function getBlockedUrlFromQuery() {
+  try {
+    const param = new URLSearchParams(window.location.search).get('blockedUrl');
+    if (param) {
+      return param;
+    }
+
+    const hashPrefix = '#blockedUrl=';
+    if (window.location.hash.startsWith(hashPrefix)) {
+      const hashUrl = window.location.hash.slice(hashPrefix.length);
+      try {
+        return decodeURIComponent(hashUrl);
+      } catch (e) {
+        return hashUrl;
+      }
+    }
+
+    return '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function getPendingBlockedUrl() {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ action: 'getPendingBlockedUrl' }, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve('');
+        return;
+      }
+
+      resolve((response && response.url) || '');
+    });
+  });
+}
+
+function setEnabledAndRefreshRules(enabled) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ action: 'setEnabledAndRefreshRules', enabled }, () => {
+      if (chrome.runtime.lastError) {
+        chrome.storage.sync.set({ enabled }, resolve);
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
+function getWebsiteDomainFromPattern(pattern) {
+  if (!pattern.startsWith('^https?://')) {
+    return null;
+  }
+
+  let domainPart = pattern
+    .replace(/^\^https\?:\/\/\+\(\[\^:\/\]\+\\\.\)\?/, '')
+    .replace(/^\^https\?:\/\/\(\[\^\/\?#\]\*\\\.\)\?/, '')
+    .replace(/\[:\/\]$/, '')
+    .replace(/\(\[\/:\?#\]\|\$\)$/, '')
+    .replace(/\\\./g, '.');
+
+  if (!/^[a-z0-9.-]+$/i.test(domainPart)) {
+    return null;
+  }
+
+  return domainPart || null;
+}
+
+function getWebsiteDisplayTextFromPattern(pattern) {
+  if (!pattern.startsWith('^https?://')) {
+    return null;
+  }
+
+  let displayText = pattern
+    .replace(/^\^https\?:\/\/\+\(\[\^:\/\]\+\\\.\)\?/, '')
+    .replace(/^\^https\?:\/\/\(\[\^\/\?#\]\*\\\.\)\?/, '')
+    .replace(/\(\[\/:\?#\]\|\$\)$/, '')
+    .replace(/\(\?:\[\/:\?#\]\.\*\)\?\$$/, '')
+    .replace(/\[:\/\]$/, '')
+    .replace(/\\\./g, '.')
+    .replace(/\\\//g, '/');
+
+  return displayText || null;
+}
+
+function doesPatternMatchUrl(pattern, lowercaseUrl) {
+  const websiteDomain = getWebsiteDomainFromPattern(pattern);
+  if (websiteDomain) {
+    try {
+      const hostname = new URL(lowercaseUrl).hostname;
+      return hostname === websiteDomain || hostname.endsWith(`.${websiteDomain}`);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  try {
+    const regex = new RegExp(pattern);
+    return regex.test(lowercaseUrl);
+  } catch (e) {
+    console.error('Invalid regex pattern');
+    return false;
+  }
+}
+
+function getDisplayText(pattern) {
+  let displayText = pattern;
+  if (pattern.startsWith('^https?://')) {
+    displayText = getWebsiteDisplayTextFromPattern(pattern) || displayText;
+  } else if (pattern.startsWith('(?:q|s|search_query)=')) {
+    displayText = displayText.replace("(?:q|s|search_query)=(.*", '');
+    displayText = displayText.replace("[^&]*)", '');
+  }
+  return displayText;
+}
+
+async function updateBlockCountForUrl(url) {
+  if (!url) {
+    await setChromeStorage({ blockCount: {} });
+    return;
+  }
+  const today = getLocalDate();
+
+  chrome.storage.local.get(['blockedCounts'], async (data) => {
+    const blockedCounts = data.blockedCounts || {};
+    const countsForToday = blockedCounts[today] || {};
+    const matchingKeys = Object.keys(countsForToday).filter(k => {
+      try {
+        return doesPatternMatchUrl(k, url.toLowerCase());
+      } catch (e) {
+        return false;
+      }
+    });
+    const counts = matchingKeys.map(key => countsForToday[key] || 0);
+
+    try {
+      const blockCounts = matchingKeys.reduce((obj, key, index) => {
+        obj[key] = counts[index];
+        return obj;
+      }, {});
+      await setChromeStorage({ blockCount: blockCounts });
+    } catch (error) {
+      console.error('Error setting storage:', error);
+    }
+  });
+}
+
+async function updateUnblockCountForUrl(url) {
+  if (!url) {
+    await setChromeStorage({ unblockCount: {} });
+    return;
+  }
+  const today = getLocalDate();
+
+  chrome.storage.local.get(['unblockCounts'], async (data) => {
+    const unblockCounts = data.unblockCounts || {};
+    const countsForToday = unblockCounts[today] || {};
+    const matchingKeys = Object.keys(countsForToday).filter(k => {
+      try {
+        return doesPatternMatchUrl(k, url.toLowerCase());
+      } catch (e) {
+        return false;
+      }
+    });
+    const counts = matchingKeys.map(key => countsForToday[key] || 0);
+
+    try {
+      const todayUnblockCounts = matchingKeys.reduce((obj, key, index) => {
+        obj[key] = counts[index];
+        return obj;
+      }, {});
+      await setChromeStorage({ unblockCount: todayUnblockCounts });
+    } catch (error) {
+      console.error('Error setting storage:', error);
+    }
+  });
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'setBlockedUrl') {
+    const url = message.url;
+    currentBlockedUrl = url;
+    updateBlockCountForUrl(url);
+  }
+});
+
+function getLocalDate() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function setChromeStorage(data) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.sync.set(data, () => {
+      if (chrome.runtime.lastError) {
+        reject(chrome.runtime.lastError);
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
+function isNightTime() {
+  const now = new Date();
+  const currentHour = now.getHours();
+  // Night time is between 9PM (21:00) and 4AM (04:00)
+  return currentHour >= 21 || currentHour < 4;
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  currentBlockedUrl = currentBlockedUrl || getBlockedUrlFromQuery() || await getPendingBlockedUrl();
+  updateBlockCountForUrl(currentBlockedUrl);
+  updateUnblockCountForUrl(currentBlockedUrl);
+  let enableConfirmMessage = true;
+  let enableReasonInput = false;
+  let enableUbButtonDisabling = false;
+  let disableDuration = 15;
+  let enableTimeInput = false;
+  let enableTempUnblocking = true;
+  let duration = 5;
+  let saveBlockedUrls = 'reason';
+  let reason = '';
+  let productiveSites = [];
+  let productiveUrls = document.getElementById('productiveUrls');
+  let madeReadingProgress = true;
+  let ubDisableDurationPassed = true;
+  let isHardMode = false;
+  let challengeCompleted = false;
+  let enableNightMode = false;
+
+  chrome.storage.sync.get(['blockedPageBgColor', 'enableConfirmMessage', 'enableReasonInput', 'enableUbButtonDisabling', 'ubDisableDuration',
+    'enableTempUnblocking', 'enableNightMode', 'unblockDuration', 'enableTimeInput', 'saveBlockedUrls', 'productiveSites',
+    'hardMode', 'enabled'], async (data) => {
+
+    const hardModeSites = data.hardMode || [];
+    const enabledSites = data.enabled || [];
+    if (currentBlockedUrl) {
+      const matchedPatterns = enabledSites.filter(pattern =>
+        doesPatternMatchUrl(pattern, currentBlockedUrl.toLowerCase())
+      );
+      if (matchedPatterns.some(p => hardModeSites.includes(p))) {
+        isHardMode = true;
+      }
+    }
+
+    if (isHardMode) {
+      document.getElementById("message").innerText = "Access Denied";
+      document.getElementById("blockedDescription").innerHTML = "This site has extra protection enabled. Complete the unblock challenge if you want to continue.";
+    }
+      
+    enableConfirmMessage = isHardMode ? true : data.enableConfirmMessage !== false;
+    enableReasonInput = isHardMode ? true : data.enableReasonInput || false;
+    enableUbButtonDisabling = isHardMode ? false : data.enableUbButtonDisabling || false;
+    disableDuration = (!isNaN(data.ubDisableDuration) && data.ubDisableDuration > 0 && data.ubDisableDuration <= 300) ? parseInt(data.ubDisableDuration, 10) : 15;
+    enableTimeInput = isHardMode ? true : data.enableTimeInput || false;
+    enableTempUnblocking = isHardMode ? true : data.enableTempUnblocking !== false;
+    enableNightMode = data.enableNightMode !== undefined ? data.enableNightMode : true;
+    duration = isHardMode ? 5 : (!isNaN(data.unblockDuration) && data.unblockDuration > 0 && data.unblockDuration <= 1440) ? parseInt(data.unblockDuration, 10) : 5;
+    saveBlockedUrls = data.saveBlockedUrls !== undefined ? data.saveBlockedUrls : 'reason';
+    document.body.style.backgroundColor = isHardMode ? "#70101E" : (data.blockedPageBgColor !== undefined ? data.blockedPageBgColor : '#1E3A5F');
+    productiveSites = data.productiveSites !== undefined ? data.productiveSites : [];
+
+    const unblockEmoji = document.getElementById("unblockEmoji");
+    if (isHardMode) {
+      unblockEmoji.innerText = "🏁";
+      document.getElementById("unblockText").innerText = "Unblock Challenge";
+    }
+    else if (enableTimeInput) {
+      unblockEmoji.innerText = "⏳";
+    } else {
+      unblockEmoji.innerText = "🔓";
+      document.getElementById("backConfirmButton").style.display = "none";
+    }
+
+    if(!enableReasonInput) {
+      document.querySelector('.default-buttons').style.display = 'block';
+      document.querySelector('.reason-input').style.display = 'none';
+    }
+
+    if (enableUbButtonDisabling) {
+      // Disable the button and start the timer
+      unblockButton.disabled = true;
+      ubDisableDurationPassed = false;
+      setTimeout(() => {
+        ubDisableDurationPassed = true;
+        checkUnblockAvailability();
+      }, disableDuration * 1000); // Disable for `disableDuration` seconds
+    }
+
+    if(productiveSites.length > 0) {
+      productiveUrls.innerHTML = '';
+      await productiveSites.forEach(site => {
+        let a = document.createElement("a");
+        a.href = site.url;
+        a.innerHTML = site.name;
+        productiveUrls.appendChild(a);
+      });
+    }
+
+    document.getElementById("focusButton").disabled = false;
+  });
+
+  setTimeout(() => {
+    chrome.storage.sync.get(['blockCount', 'unblockCount', 'enabled'], (data) => {
+      const blockCount = data.blockCount;
+      const unblockCount = data.unblockCount;
+      const enabledSites = data.enabled || [];
+      const blockCountMessage = document.getElementById('blockCountMessage');
+      const unblockCountMessage = document.getElementById('unblockCountMessage');
+      blockCountMessage.innerHTML = '';
+      unblockCountMessage.innerHTML = '';
+
+      if (blockCount && Object.keys(blockCount).length > 0) {
+        const blockEntries = Object.entries(blockCount);
+        const blockMessages = blockEntries
+          .filter(([pattern]) => enabledSites.includes(pattern))
+          .map(([pattern, count]) => {
+            const displayText = getDisplayText(pattern);
+            const times = (count === 1) ? 'time' : 'times';
+            return `<b>${displayText}</b> ${count} ${times}`;
+          });
+        let joinedMessages;
+        if (blockMessages.length > 2) {
+          const lastMessage = blockMessages.pop();
+          joinedMessages = blockMessages.join(', ') + ', and ' + lastMessage;
+        } else if (blockMessages.length === 2) {
+          const lastMessage = blockMessages.pop();
+          joinedMessages = blockMessages.join('') + ' and ' + lastMessage;
+        } else {
+          joinedMessages = blockMessages.join('');
+        }
+        const p = document.createElement('p');
+        p.innerHTML = `Website Blocker has blocked ${joinedMessages} today.`;
+        blockCountMessage.appendChild(p);
+      }
+
+      if (unblockCount) {
+        const unblockEntries = Object.entries(unblockCount);
+        const unblockMessages = unblockEntries
+          .map(([pattern, count]) => {
+            const displayText = getDisplayText(pattern);
+            const times = (count === 1) ? 'once' : `${count} times`;
+            return `<b>${displayText}</b> was unblocked ${times}`;
+          });
+
+        if (unblockMessages.length > 0) {
+          let joinedMessages;
+          if (unblockMessages.length > 2) {
+            const lastMessage = unblockMessages.pop();
+            joinedMessages = unblockMessages.join(', ') + ', and ' + lastMessage;
+          } else if (unblockMessages.length === 2) {
+            const lastMessage = unblockMessages.pop();
+            joinedMessages = unblockMessages.join('') + ' and ' + lastMessage;
+          } else {
+            joinedMessages = unblockMessages.join('');
+          }
+          const p = document.createElement('p');
+          p.innerHTML = `${joinedMessages} today.`;
+          unblockCountMessage.appendChild(p);
+        } else if (currentBlockedUrl) {
+          const matchedPatterns = enabledSites.filter(pattern => doesPatternMatchUrl(pattern, currentBlockedUrl.toLowerCase()));
+          if (matchedPatterns.length > 0) {
+            const noAttemptMessages = matchedPatterns.map(pattern => {
+              const displayText = getDisplayText(pattern);
+              return `<b>${displayText}</b> has not been unblocked today.`;
+            });
+            const p = document.createElement('p');
+            p.innerHTML = noAttemptMessages.join(' ');
+            unblockCountMessage.appendChild(p);
+          }
+        }
+      }
+
+      if (currentBlockedUrl) {
+      chrome.storage.sync.get(null, (data) => {
+        const enabled = data.enabled || [];
+        const matchedPatterns = enabled.filter(pattern => doesPatternMatchUrl(pattern, currentBlockedUrl.toLowerCase()));
+        if (matchedPatterns.length > 0) {
+          const timestamps = matchedPatterns.map(pattern => data[`blockedTimestamp_${getDisplayText(pattern)}`]);
+          const durations = timestamps.map(timestamp => timestamp ? getBlockingDuration(timestamp) : "a while");
+          const durationText = durations.map((duration, index) => `<b>${getDisplayText(matchedPatterns[index])}</b> has been blocked for ${duration}.`).join("<br>");
+          document.getElementById('durationText').innerHTML = durationText;
+        }
+      });
+    }
+    });
+  }, 100);
+
+  function checkUnblockAvailability() {
+    if (madeReadingProgress && ubDisableDurationPassed) {
+      unblockButton.disabled = false;
+    } else {
+      unblockButton.disabled = true;
+    }
+  }
+
+  const saveUrl = () => {
+    if (!currentBlockedUrl) return;
+    chrome.storage.sync.get('enabled', (data) => {
+      const patterns = data.enabled.filter(pattern => doesPatternMatchUrl(pattern, currentBlockedUrl.toLowerCase()));
+      chrome.runtime.sendMessage({ action: 'saveBlockedUrl', url: currentBlockedUrl, patterns, reason });
+    });
+  };
+  
+  const closeTab = () => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      chrome.tabs.remove(tabs[0].id);
+    });
+  };
+
+  // Helper function to extract domain from URL
+  const extractDomain = (url) => {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.origin; // Returns scheme + domain (e.g., https://example.com)
+    } catch (e) {
+      return url;
+    }
+  };
+
+  // Smart redirect: if tabs with the redirect URL exist, focus on one and close current tab
+  // Otherwise, open the redirect URL in a new tab
+  const smartRedirect = (redirectUrl) => {
+    const redirectDomain = extractDomain(redirectUrl);
+
+    chrome.tabs.query({ active: true, currentWindow: true }, (activeTabs) => {
+      const currentTabId = activeTabs[0]?.id;
+      
+      chrome.tabs.query({}, (allTabs) => {
+        // Find tabs that match the redirect URL (either exact match or same domain/base URL)
+        const matchingTabs = allTabs.filter(tab => {
+          if (!tab.url) return false;
+          const tabDomain = extractDomain(tab.url);
+          // Match if the tab's domain starts with or matches the redirect domain
+          return tabDomain.startsWith(redirectDomain) || tab.url.startsWith(redirectUrl);
+        });
+
+        if (matchingTabs.length > 0) {
+          // Focus on the matching tab FIRST (before removing current tab)
+          // This ensures focus stays on the matching tab after removal
+          chrome.tabs.update(matchingTabs[0].id, { active: true });
+          chrome.windows.update(matchingTabs[0].windowId, { focused: true }, () => {
+            // Then close the current (blocked) tab
+            chrome.tabs.remove(currentTabId);
+          });
+        } else {
+          // No matching tabs found, open the redirect URL
+          chrome.tabs.create({ url: redirectUrl }, () => {
+            chrome.tabs.remove(currentTabId);
+          });
+        }
+      });
+    });
+  };
+
+  function isDailyGoalCompletedToday(goal) {
+    return goal.completedDate === getLocalDate();
+  }
+
+  function getNextDailyGoal(dailyGoals) {
+    return (dailyGoals || []).find(goal => !isDailyGoalCompletedToday(goal));
+  }
+
+  function resetDailyGoalsIfNeeded(callback) {
+    chrome.runtime.sendMessage({ action: 'resetDailyGoals' }, () => {
+      callback();
+    });
+  }
+
+  function redirectToNextDailyGoal(fallback, messageLink) {
+    resetDailyGoalsIfNeeded(() => chrome.storage.sync.get(['dailyGoals'], (data) => {
+      const nextGoal = getNextDailyGoal(data.dailyGoals || []);
+      if (messageLink) {
+        smartRedirect(messageLink);
+      } else if (nextGoal && nextGoal.url) {
+        smartRedirect(nextGoal.url);
+      } else {
+        fallback();
+      }
+    }));
+  }
+
+  function toggleDailyGoal(goalId, completed) {
+    chrome.storage.sync.get(['dailyGoals'], (data) => {
+      const dailyGoals = data.dailyGoals || [];
+      const updatedGoals = dailyGoals.map(goal => {
+        if (goal.id !== goalId) return goal;
+        return {
+          ...goal,
+          completedDate: completed ? getLocalDate() : ''
+        };
+      });
+      chrome.storage.sync.set({ dailyGoals: updatedGoals }, renderDailyGoals);
+    });
+  }
+
+  function renderDailyGoals() {
+    resetDailyGoalsIfNeeded(() => chrome.storage.sync.get(['dailyGoals'], (data) => {
+      const dailyGoals = data.dailyGoals || [];
+      const dailyGoalsSection = document.getElementById('dailyGoalsSection');
+      const dailyGoalsList = document.getElementById('dailyGoals');
+      const closeButton = document.getElementById('closeButton');
+
+      if (!dailyGoalsSection || !dailyGoalsList || dailyGoals.length === 0) {
+        return;
+      }
+
+      dailyGoalsSection.style.display = 'block';
+      dailyGoalsList.innerHTML = '';
+
+      dailyGoals.forEach(goal => {
+        const isCompleted = isDailyGoalCompletedToday(goal);
+        const listItem = document.createElement('li');
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = isCompleted;
+        checkbox.addEventListener('change', () => {
+          toggleDailyGoal(goal.id, checkbox.checked);
+        });
+
+        const title = document.createElement('span');
+        title.textContent = goal.title || 'Habit';
+        title.classList.add('name');
+        if (isCompleted) {
+          title.classList.add('completed');
+        }
+
+        const link = goal.url ? document.createElement('a') : document.createElement('span');
+        if (goal.url) {
+          link.href = goal.url;
+          link.textContent = 'Open';
+          link.addEventListener('click', (event) => {
+            event.preventDefault();
+            smartRedirect(goal.url);
+          });
+        } else {
+          link.textContent = 'No URL';
+        }
+        link.classList.add('text');
+
+        listItem.appendChild(checkbox);
+        listItem.appendChild(title);
+        listItem.appendChild(link);
+        dailyGoalsList.appendChild(listItem);
+      });
+
+      adjustDailyGoalColumnWidths();
+      const nextGoal = getNextDailyGoal(dailyGoals);
+      closeButton.innerText = nextGoal && nextGoal.url ? '➡️ Go to Next Habit' : (data.messageLink ? '➡️ Go to Next Habit' : '🔒 Close Tab');
+    }));
+  }
+
+  function adjustDailyGoalColumnWidths() {
+    const dailyGoalsList = document.getElementById('dailyGoals');
+
+    let longestName = 0;
+    Array.from(dailyGoalsList.children).forEach(li => {
+      const name = li.querySelector('.name').textContent;
+
+      const nameWidth = getTextWidth(name, '16px Arial');
+
+      if (nameWidth > longestName) longestName = nameWidth;
+    });
+
+    longestName += 10;
+
+    Array.from(dailyGoalsList.children).forEach(li => {
+      li.style.gridTemplateColumns = `28px ${longestName}px max-content`;
+    });
+  }
+
+  function getTextWidth(text, font) {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    context.font = font;
+    const metrics = context.measureText(text);
+    return metrics.width;
+  }
+
+  async function unblockSite(duration, canTempUnblock) {
+    if (!currentBlockedUrl) {
+      closeTab();
+      return;
+    }
+
+    chrome.storage.sync.get(['blocked', 'enabled'], async (data) => {
+      const blocked = data.blocked || [];
+      const enabled = data.enabled || [];
+
+      let toUnblock = [];
+
+      blocked.forEach(blockedItem => {
+        try {
+          if (doesPatternMatchUrl(blockedItem, currentBlockedUrl.toLowerCase()) && enabled.includes(blockedItem)) {
+            toUnblock.push(blockedItem);
+          }
+        } catch (e) {
+          console.error('Invalid regex pattern');
+        }
+      });
+
+      let newEnabled = enabled.filter(enabledItem => !toUnblock.includes(enabledItem));
+
+      await setEnabledAndRefreshRules(newEnabled);
+
+      if (toUnblock.length > 0) {
+        chrome.storage.local.get(['unblockCounts'], (data) => {
+          const today = getLocalDate();
+          let unblockCounts = data.unblockCounts || {};
+
+          const thirtyDaysAgo = new Date();
+          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+          const cutoffDate = thirtyDaysAgo.toISOString().split('T')[0];
+
+          unblockCounts = Object.fromEntries(
+            Object.entries(unblockCounts).filter(([date]) => date >= cutoffDate)
+          );
+
+          if (!unblockCounts[today]) {
+            unblockCounts[today] = {};
+          }
+
+          toUnblock.forEach(item => {
+            const key = item || currentBlockedUrl;
+            if (!unblockCounts[today][key]) {
+              unblockCounts[today][key] = 0;
+            }
+            unblockCounts[today][key]++;
+          });
+
+          chrome.storage.local.set({ unblockCounts }, () => {
+            updateUnblockCountForUrl(currentBlockedUrl);
+          });
+        });
+      }
+
+      if (!isNaN(duration) && duration > 0 && duration <= 1440 && canTempUnblock) {
+        chrome.runtime.sendMessage({
+          action: 'scheduleReblock',
+          url: currentBlockedUrl,
+          duration: duration,
+          itemsToReblock: toUnblock
+        });
+      }
+
+      chrome.tabs.update({ url: currentBlockedUrl });
+    });
+  }
+
+  async function showConfirmMessage() {
+    if (!enableConfirmMessage) {
+      enableTimeInput ? await handleUnblockTime() : await unblockSite(duration, enableTempUnblocking);
+    } else {
+      let confirmText = "Reason for unblocking: " + (reason ? `"${reason}"` : "No reason provided");
+      let unblockTime = getUnblockingDuration();
+      document.getElementById("unblockTime").innerHTML = `The site will remain unblocked <strong>${unblockTime}</strong>.<br>Restrictions may not be immediately re-enabled during this period.`;
+
+      document.getElementById('confirmText').innerText = confirmText;
+      document.querySelector('.time-input').style.display = 'none';
+      document.querySelector('.default-buttons').style.display = 'none';
+      document.querySelector('.challenge').style.display = 'none';
+      document.querySelector('.confirm-message').style.display = 'block';
+      if (isHardMode) {
+        document.getElementById("hardModeWarning").style.display = "block";
+      }
+    }
+  }
+
+  function showNightModeMessage() {
+    // Hide all other sections
+    document.querySelector('.default-buttons').style.display = 'none';
+    document.querySelector('.confirm-message').style.display = 'none';
+    document.querySelector('.challenge').style.display = 'none';
+    document.querySelector('.time-input').style.display = 'none';
+    document.querySelector('.reason-input').style.display = 'none';
+    document.querySelector('.message-buttons').style.display = 'none';
+
+    // Show the night mode message
+    document.getElementById("message").innerText = "Night Mode Active";
+    document.getElementById("blockedDescription").innerHTML = "Hard-mode unblocking is paused during nighttime hours. You can return when night mode ends.";
+    document.querySelector('.night-buttons').style.display = 'block';
+
+    // Hide block count message
+    document.getElementById("productiveUrls").style.display = "none";
+    document.getElementById("blockCountMessage").style.display = "none";
+    document.getElementById("unblockCountMessage").style.display = "none";
+    document.getElementById("durationText").style.display = "none";
+  }
+
+  function getBlockingDuration(startTime) {
+    const now = Date.now();
+    const durationMs = now - startTime;
+
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+    if (durationMs < minute) {
+      return 'less than a minute';
+    } else if (durationMs < hour) {
+      const minutes = Math.floor(durationMs / minute);
+      return `${minutes} minute${minutes !== 1 ? 's' : ''}`;
+    } else if (durationMs < day) {
+      const hours = Math.floor(durationMs / hour);
+      const minutes = Math.floor((durationMs % hour) / minute);
+      return `${hours} hour${hours !== 1 ? 's' : ''} and ${minutes} minute${minutes !== 1 ? 's' : ''}`;
+    } else if (durationMs < 30 * day) {
+      const days = Math.floor(durationMs / day);
+      const hours = Math.floor((durationMs % day) / hour);
+      return `${days} day${days !== 1 ? 's' : ''} and ${hours} hour${hours !== 1 ? 's' : ''}`;
+    } else {
+      return 'a while';
+    }
+  }
+
+  function showReasonInput() {
+    document.querySelector('.default-buttons').style.display = 'none';
+    document.querySelector('.reason-input').style.display = 'block';
+  }
+
+  function submitReason() {
+    reason = document.getElementById('reason').value.trim();
+    if(saveBlockedUrls === 'always' || saveBlockedUrls == 'reason' && reason !== '')
+      saveUrl();
+    document.querySelector('.reason-input').style.display = 'none';
+    document.querySelector('.default-buttons').style.display = 'block';
+  }
+
+  function showChallenge() {
+    document.querySelector('.default-buttons').style.display = 'none';
+    document.querySelector('.confirm-message').style.display = 'none';
+    document.querySelector('.challenge').style.display = 'block';
+
+    const challengeText = quotes[Math.floor(Math.random() * quotes.length)];
+    const challengeQuestionElem = document.getElementById("challengeQuestion");
+    const challengeQuote = challengeText.quote
+      .replace(/—|–/g, ', ')
+      .replace(/…/g, '...')
+      .replace(/[“”]/g, '"');
+    challengeQuestionElem.innerText = challengeQuote;
+    challengeQuestionElem.title = "Quote from " + (challengeText.author ? challengeText.author : "the Developer");
+
+    const answerField = document.getElementById("challengeAnswer");
+    answerField.onpaste = (e) => e.preventDefault();    // Prevent pasting
+    answerField.ondragover = (e) => e.preventDefault(); // Prevent drag-over highlight
+    answerField.ondrop = (e) => e.preventDefault();     // Prevent dropped content
+  }
+
+  const durationSelect = document.getElementById('unblockDuration');
+  const customDurationInput = document.getElementById('customDuration');
+  const customDurationHrsInput = document.getElementById('customDurationHrs');
+
+  async function showTimeInput(firstSet) {
+    if (firstSet)
+      document.getElementById('customDuration').value = duration.toString();
+    if (!enableTimeInput) {
+      await showConfirmMessage();
+    } else {
+      document.querySelector('.default-buttons').style.display = 'none';
+      document.querySelector('.confirm-message').style.display = 'none';
+      document.querySelector('.challenge').style.display = 'none';
+      document.querySelector('.time-input').style.display = 'block';
+    }
+  }
+
+  function getUnblockingDuration() {
+    if (!enableTimeInput && !enableTempUnblocking || duration === 'forever')
+      return 'until you choose to block it again';
+    else if(duration >= 60) {
+      const hour = 60;
+      let hours = Math.floor(duration / hour);
+      let minutes = Math.floor(duration % hour);
+      if (minutes === 0)
+        return `for ${hours} hour${hours !== 1 ? 's' : ''}`;
+      return `for ${hours} hour${hours !== 1 ? 's' : ''} and ${minutes} minute${minutes !== 1 ? 's' : ''}`;
+    }
+    else
+      return `for ${duration} minute${duration !== '1' ? 's' : ''}`
+  }
+
+  async function handleUnblockTime() {
+    if (!enableTimeInput && !enableTempUnblocking || duration === 'forever') {
+      await unblockSite(0, false);
+    } else {
+      await unblockSite(parseInt(duration, 10), true);
+    }
+  }
+
+  function remainFocused() {
+    chrome.storage.sync.get(['focusOption', 'redirectUrl', 'enableMessage', 'message', 'messageLink', 'dailyGoals'], (data) => {
+      const hasDailyGoals = (data.dailyGoals || []).length > 0;
+      if(data.enableMessage || isHardMode || hasDailyGoals) {
+        document.querySelector(".default-buttons").style.display = "none";
+        document.querySelector(".confirm-message").style.display = "none";
+        document.querySelector(".challenge").style.display = "none";
+        document.querySelector(".message-buttons").style.display = "block";
+        document.querySelector("p").innerHTML = "";
+        document.getElementById("blockCountMessage").innerHTML = "";
+        document.getElementById("unblockCountMessage").style.display = "none";
+        document.getElementById("durationText").innerHTML = "";
+
+        const messageText = data.message !== undefined ? data.message : "You can do it! Stay focused!";
+        setMessageWithOptionalLink(messageText, data.messageLink || '');
+        renderDailyGoals();
+      } else if (data.focusOption === "redirect") {
+        smartRedirect(data.redirectUrl);
+      } else {
+        closeTab();
+      }
+    });
+  }
+
+  document.getElementById('submitReasonButton').addEventListener('click', () => {
+    try {
+      submitReason();
+    } catch (error) {
+      console.error('Error in submitReason:', error);
+    }
+  });
+  document.getElementById('reason').addEventListener('keypress', (event) => {
+    if (event.key === 'Enter') {
+      try {
+        submitReason();
+      } catch (error) {
+        console.error('Error submitting reason:', error);
+      }
+    }
+  });
+  document.getElementById('unblockButton').addEventListener('click', async () => {
+    try {
+      await isHardMode && !challengeCompleted ? showChallenge() : showTimeInput(true);
+    } catch (error) {
+      console.error('Error in unblock:', error);
+    }
+  });
+  document.getElementById('reasonButton').addEventListener('click', () => {
+    try {
+      showReasonInput(true);
+    } catch (error) {
+      console.error('Error in reasonButton:', error);
+    }
+  });
+  document.getElementById('focusButton').addEventListener('click', () => {
+    try {
+      remainFocused();
+    } catch (error) {
+      console.error('Error in focusButton:', error);
+    }
+  });
+  document.getElementById('submitChallengeButton').addEventListener('click', async () => {
+    try {
+      if (challengeCompleted) {
+        await showTimeInput(true);
+        return;
+      }
+      const userAnswer = document.getElementById("challengeAnswer").value.trim();
+      const challengeText = document.getElementById("challengeQuestion").innerText.replace(/’/g, "'");
+      const feedbackElem = document.getElementById("challengeFeedback");
+      if (userAnswer !== challengeText) {
+        feedbackElem.innerText = "That doesn't match. Please try again.";
+        return;
+      }
+      challengeCompleted = true;
+      document.getElementById("unblockEmoji").innerText = "⏳";
+      document.getElementById("unblockText").innerText = "Unblock Site";
+      document.getElementById("challengeFeedback").innerText = "Challenge completed. You may unblock the site.";
+      document.getElementById("submitChallengeButton").innerText = "⏳ Unblock Site";
+      document.getElementById("challengeAnswer").value = "";
+      document.getElementById("challengeInput").style.display = "none";
+      const challengeQuestionElem = document.getElementById("challengeQuestion");
+      let authorText = challengeQuestionElem.title.replace(/^Quote from /, '');
+      if (authorText === "the Developer") authorText = "the Developer";
+      challengeQuestionElem.innerText += ` – ${authorText}`;
+      const focusBtn = document.createElement('button');
+      focusBtn.id = 'challengeFocusButton';
+      focusBtn.className = 'focus-button';
+      focusBtn.innerText = '🔒 Remain Focused';
+      focusBtn.onclick = () => {
+        try {
+          remainFocused();
+        } catch (error) {
+          console.error('Error in focusButton:', error);
+        }
+      };
+      document.getElementById('submitChallengeButton').after(focusBtn);
+    } catch (error) {
+      console.error('Error in submitChallengeButton:', error);
+    }
+  });
+  document.getElementById('unblockDuration').addEventListener('change', (event) => {
+    const colon = document.getElementById('customDurationColon');
+    if (event.target.value === 'custom') {
+      customDurationInput.style.display = 'inline';
+      customDurationHrsInput.style.display = 'none';
+      colon.style.display = 'none';
+      customDurationInput.min = '1';
+      customDurationInput.max = '1440';
+      customDurationInput.value = parseInt(customDurationHrsInput.value) * 60 + parseInt(customDurationInput.value);
+    } else if (event.target.value === 'hours') {
+      customDurationInput.style.display = 'inline';
+      customDurationHrsInput.style.display = 'inline';
+      colon.style.display = 'inline';
+      if (Math.floor(customDurationInput.value / 60) !== parseInt(customDurationHrsInput.value))
+        customDurationHrsInput.value = Math.floor(customDurationInput.value / 60)
+      customDurationInput.value = customDurationInput.value % 60;
+      customDurationInput.min = '0';
+      customDurationInput.max = '59';
+    } else {
+      customDurationInput.style.display = 'none';
+      customDurationHrsInput.style.display = 'none';
+      colon.style.display = 'none';
+    }
+  });
+  document.getElementById('unblockTimeButton').addEventListener('click', async () => {
+    try {
+      duration = durationSelect.value;
+      if (duration === 'custom') {
+        duration = customDurationInput.value;
+      } else if (duration === 'hours') {
+        duration = parseInt(customDurationHrsInput.value) * 60 + parseInt(customDurationInput.value);
+      } else if (duration === '6AM') {
+        // Calculate the time until 6 AM
+        const now = new Date();
+        const currentHour = now.getHours();
+        // If it's before 6 AM, use today's 6 AM. Otherwise use tomorrow's 6 AM.
+        const daysToAdd = currentHour < 6 ? 0 : 1;
+        const sixAM = new Date(now.getFullYear(), now.getMonth(), now.getDate() + daysToAdd, 6, 0, 0);
+        const timeDiff = sixAM - now;
+        // Set duration to the time difference in minutes
+        duration = Math.floor(timeDiff / (1000 * 60));
+      }
+      if (duration === 'forever' || !isNaN(duration) && duration > 0 && duration <= 1440) {
+        await showConfirmMessage();
+      } else {
+        alert('Please enter a valid duration.');
+      }
+    } catch (error) {
+      console.error('Error in unblockTimeButton:', error);
+    }
+  });
+  document.getElementById('backTimeButton').addEventListener('click', () => {
+    try {
+      document.querySelector('.default-buttons').style.display = 'block';
+      document.querySelector('.time-input').style.display = 'none';
+    } catch (error) {
+      console.error('Error in backTimeButton:', error)
+    }
+  });
+  document.getElementById('confirmUnblockButton').addEventListener('click', async () => {
+    try {
+      // Check for night mode before final unblock - only for hard mode sites
+      if (isHardMode && enableNightMode && isNightTime()) {
+        showNightModeMessage();
+        return;
+      }
+      await handleUnblockTime();
+    } catch (error) {
+      console.error('Error in handleUnblockTime:', error);
+    }
+  });
+  document.getElementById('cancelUnblockButton').addEventListener('click', () => {
+    try {
+      remainFocused();
+    } catch (error) {
+      console.error('Error in remainFocused:', error)
+    }
+  });
+  document.getElementById('backConfirmButton').addEventListener('click', () => {
+    try {
+      showTimeInput(false);
+    } catch (error) {
+      console.error('Error in showTimeInput:', error);
+    }
+  })
+
+  function setMessageWithOptionalLink(message, messageLink) {
+    const messageElement = document.getElementById('message');
+    messageElement.onclick = null;
+    messageElement.style.cursor = '';
+
+    if (messageLink) {
+      messageElement.innerHTML = '';
+      const anchor = document.createElement('a');
+      anchor.href = '#';
+      anchor.textContent = message;
+      anchor.style.color = 'inherit';
+      anchor.style.textDecoration = 'underline';
+      anchor.addEventListener('click', (event) => {
+        event.preventDefault();
+        try {
+          chrome.tabs.create({ url: messageLink });
+        } catch (error) {
+          console.error('Error opening message link:', error);
+        }
+      });
+      messageElement.appendChild(anchor);
+      messageElement.style.cursor = 'pointer';
+    } else {
+      messageElement.textContent = message;
+    }
+  }
+
+  document.getElementById('editMessageButton').addEventListener('click', () => {
+    try {
+      let message = prompt('What would you like the message to say?');
+      if (message === undefined) {
+        return;
+      }
+      message = message.trim();
+      if (message === '') {
+        resetMessage();
+        return;
+      }
+
+      let messageLink = prompt('Optional: enter a URL for the message link (leave blank for no link).');
+      if (messageLink === undefined) messageLink = '';
+      messageLink = messageLink.trim();
+
+      let storedMessageLink = '';
+      if (messageLink) {
+        try {
+          const parsed = new URL(messageLink);
+          if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+            storedMessageLink = messageLink;
+          } else {
+            alert('The message link is not valid. Only http:// and https:// URLs are accepted. The message will still be saved.');
+          }
+        } catch (error) {
+          alert('The message link is not valid. Only http:// and https:// URLs are accepted. The message will still be saved.');
+        }
+      }
+
+      chrome.storage.sync.set({ message, messageLink: storedMessageLink });
+      setMessageWithOptionalLink(message, storedMessageLink);
+    } catch (error) {
+      console.error('Error in editMessageButton:', error);
+    }
+  });
+
+  function resetMessage() {
+    const resetMessageText = "You can do it! Stay focused!";
+    chrome.storage.sync.set({ message: resetMessageText, messageLink: '' });
+    setMessageWithOptionalLink(resetMessageText, '');
+  }
+
+  document.getElementById('closeButton').addEventListener('click', () => {
+    try {
+      chrome.storage.sync.get(['focusOption', 'redirectUrl', 'enableMessage', 'message', 'messageLink'], (data) => {
+        redirectToNextDailyGoal(() => {
+          if (data.focusOption === "redirect") {
+            smartRedirect(data.redirectUrl);
+          } else {
+            closeTab();
+          }
+        }, data.messageLink);
+      });
+    } catch (error) {
+      console.error('Error in closeButton:', error)
+    }
+  });
+  document.getElementById('closeButtonNight').addEventListener('click', () => {
+    try {
+      closeTab();
+    } catch (error) {
+      console.error('Error in closeButton:', error)
+    }
+  });
+  document.getElementById('habitTrackerButton').addEventListener('click', async () => {
+    try {
+      chrome.tabs.query({}, (tabs) => {
+        const optionsUrl = chrome.runtime.getURL('options.html');
+        let optionsTab = null;
+  
+        for (const tab of tabs) {
+          if (tab.url === optionsUrl) {
+            optionsTab = tab;
+            break;
+          }
+        }
+  
+        if (optionsTab) {
+          chrome.tabs.update(optionsTab.id, { active: true }, () => {
+            chrome.tabs.sendMessage(optionsTab.id, { action: 'openDailyGoals' });
+          });
+          chrome.tabs.getCurrent((tab) => {
+            chrome.tabs.remove(tab.id);
+          });
+        } else {
+          chrome.storage.sync.set({ openTab: 'DailyGoals' }, () => {
+            chrome.tabs.update({ url: optionsUrl });
+          });
+        }
+      });
+    } catch (error) {
+      console.error('Error in habitTrackerButton:', error);
+    }
+  });
+});
