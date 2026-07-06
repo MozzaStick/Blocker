@@ -225,13 +225,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Set blocking options
     backgroundColorSelect.value = data.blockedPageBgColor !== undefined ? data.blockedPageBgColor : "#1E3A5F";
-    confirmMessage.checked = data.enableConfirmMessage !== undefined ? data.enableConfirmMessage : true;
+    confirmMessage.checked = data.enableConfirmMessage !== undefined ? data.enableConfirmMessage : false;
     reasonInput.checked = data.enableReasonInput !== undefined ? data.enableReasonInput : false;
     ubButtonDisabling.checked = data.enableUbButtonDisabling !== undefined ? data.enableUbButtonDisabling : false;
     disableDuration.value = data.ubDisableDuration !== undefined ? data.ubDisableDuration : 15;
-    timeInput.checked = data.enableTimeInput !== undefined ? data.enableTimeInput : false;
+    timeInput.checked = data.enableTimeInput !== undefined ? data.enableTimeInput : true;
     tempUnblocking.checked = data.enableTempUnblocking !== undefined ? data.enableTempUnblocking : true;
-    nightMode.checked = data.enableNightMode !== undefined ? data.enableNightMode : true;
+    nightMode.checked = data.enableNightMode !== undefined ? data.enableNightMode : false;
     tempUbOptions.checked = data.enableTempUbOptions !== undefined ? data.enableTempUbOptions : false;
     tempUbPopup.checked = data.enableTempUbPopup !== undefined ? data.enableTempUbPopup : false;
     ubDuration.value = data.unblockDuration !== undefined ? data.unblockDuration : 5;
@@ -241,7 +241,7 @@ document.addEventListener('DOMContentLoaded', () => {
     displayMessage.checked = data.enableMessage !== undefined ? data.enableMessage : false;
     messageField.value = data.message !== undefined ? data.message : "You can do it! Stay focused!";
     messageLinkField.value = data.messageLink !== undefined ? data.messageLink : "";
-    notiReblock.checked = data.enableNotiReblock !== undefined ? data.enableNotiReblock : false;
+    notiReblock.checked = data.enableNotiReblock !== undefined ? data.enableNotiReblock : true;
     updateCheckboxState();
     toggleFocusField();
     
